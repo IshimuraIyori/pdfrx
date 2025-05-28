@@ -187,7 +187,7 @@ class FileSystemEmulator {
       this.fd2context[fd] = { ...funcs, fd, flags, mode, dirfd, position: 0 };
       return fd;
     }
-    console.error(`openFile: not found: ${dirfd}/${fn}`);
+    console.error(`openFile: not found: ${dirfd} ${fn}`);
     return -1;
   }
 
@@ -359,11 +359,146 @@ class FileSystemEmulator {
   }
 };
 
+/**
+ * Enhanced FileSystemEmulator with Local Font Access API support
+ */
+class LocalFontAwareFileSystemEmulator extends FileSystemEmulator {
+  /**
+   * Override openFile to intercept font requests
+   */
+  openFile(dirfd, fileNamePtr, flags, mode) {
+    const fn = StringUtils.utf8BytesToString(new Uint8Array(Pdfium.memory.buffer, fileNamePtr, 2048));
+    
+    // Check if this is a font file request in /usr/share/fonts
+    if (fn === '/usr/share/fonts') {
+      // Populate the fonts directory with local fonts
+      this.populateLocalFontsDirectory();
+      return 10000;
+    } else if (fn.startsWith('/usr/share/fonts/')) {
+      const fontFileName = fn.substring('/usr/share/fonts/'.length);
+      // Send a message to the main thread to request the font
+      // This is async, so we must block until we get the data (simulate sync with Atomics)
+      if (!self.fontSyncBuffer) {
+        self.fontSyncBuffer = new SharedArrayBuffer(8 * 1024 * 1024); // 8MB buffer
+        self.fontSyncView = new Uint8Array(self.fontSyncBuffer);
+        self.fontSyncStatus = new Int32Array(self.fontSyncBuffer, 0, 1);
+      }
+      // Clear status
+      Atomics.store(self.fontSyncStatus, 0, 0);
+      // Request font from main thread
+      postMessage({ type: 'font-request', fontName: fontFileName, buffer: self.fontSyncBuffer }, [self.fontSyncBuffer]);
+      // Wait for response (status = 1)
+      const timeout = 5000;
+      const start = Date.now();
+      while (Atomics.load(self.fontSyncStatus, 0) === 0) {
+        if (Date.now() - start > timeout) {
+          console.warn('Font request timeout for', fontFileName);
+          break;
+        }
+        Atomics.wait(self.fontSyncStatus, 0, 0, 10);
+      }
+      // If font data was written, register it
+      const dataLength = Atomics.load(self.fontSyncStatus, 0);
+      if (dataLength > 0) {
+        const fontData = self.fontSyncBuffer.slice(4, 4 + dataLength);
+        this.registerFileWithData(fn, fontData);
+      }
+    }
+
+    if (!self.prevOnMessage) {
+      self.prevOnMessage = self.onmessage;
+      self.onmessage = function(event) {
+        const data = event.data;
+        if (data && data.type === 'font-response' && data.fontData && self.fontSyncBuffer) {
+          // Write font data into the buffer
+          const fontBytes = new Uint8Array(data.fontData);
+          self.fontSyncView.set(fontBytes, 4); // leave first 4 bytes for status/length
+          Atomics.store(self.fontSyncStatus, 0, fontBytes.length);
+          Atomics.notify(self.fontSyncStatus, 0);
+          return;
+        }
+        self.prevOnMessage(event);
+      };
+    }
+    
+    // Fallback to original implementation
+    return super.openFile(dirfd, fileNamePtr, flags, mode);
+  }
+  
+  /**
+   * Override getdents64 to include local fonts in directory listing
+   */
+  getdents64(fd, dirp, count) {
+    const context = this.fd2context[fd];
+
+    console.log(`getdents64: ${context.fileName}, dirp: ${dirp}, count: ${count}`);
+    
+    // If listing /usr/share/fonts directory, include local fonts
+    if (context && context.fileName === '/usr/share/fonts') {
+      console.log('Directory listing requested for /usr/share/fonts, including local fonts');
+      this.populateLocalFontsDirectory();
+    }
+    
+    return super.getdents64(fd, dirp, count);
+  }
+  
+  /**
+   * Populate /usr/share/fonts directory with available local fonts
+   */
+  populateLocalFontsDirectory() {
+    if (!localFontsSyncArray) {
+      return;
+    }
+    
+    try {
+      // Request font list from main thread
+      Atomics.store(localFontsSyncArray, 1, 0); // no data needed for query
+      Atomics.store(localFontsSyncArray, 2, 0); // operation: query
+      Atomics.store(localFontsSyncArray, 0, 1); // status: request
+      Atomics.notify(localFontsSyncArray, 0);
+      
+      // Wait for response
+      const timeout = 5000;
+      const start = Date.now();
+      while (Atomics.load(localFontsSyncArray, 0) === 1) {
+        if (Date.now() - start > timeout) {
+          console.warn('Font list request timeout');
+          return;
+        }
+        const dummy = new Int32Array(new SharedArrayBuffer(4));
+        Atomics.wait(dummy, 0, 0, 1);
+      }
+      
+      const status = Atomics.load(localFontsSyncArray, 0);
+      if (status === 2) { // response
+        const dataLength = Atomics.load(localFontsSyncArray, 1);
+        if (dataLength > 0) {
+          const fontListData = new Uint8Array(localFontsSyncBuffer, 16, dataLength);
+          const fontListJson = new TextDecoder().decode(fontListData);
+          const fontList = JSON.parse(fontListJson);
+          
+          // Register directory with font entries
+          const entries = fontList.map(font => `${font.family}-${font.style}.ttf`);
+          this.registerDirectoryWithEntries('/usr/share/fonts', entries);
+          
+          console.log(`Registered ${entries.length} local fonts in /usr/share/fonts`);
+        }
+      }
+      
+      // Reset sync array
+      Atomics.store(localFontsSyncArray, 0, 0);
+    } catch (err) {
+      console.error('Error populating local fonts directory:', err);
+      Atomics.store(localFontsSyncArray, 0, 0);
+    }
+  }
+}
+
 function _error(e) { return e.stack ? e.stack.toString() : e.toString(); }
 
 function _notImplemented(name) { throw new Error(`${name} is not implemented`); }
 
-const fileSystem = new FileSystemEmulator();
+const fileSystem = new LocalFontAwareFileSystemEmulator();
 
 const emEnv = {
   __assert_fail: function(condition, filename, line, func) { throw new Error(`Assertion failed: ${condition} at ${filename}:${line} (${func})`); },
@@ -444,6 +579,34 @@ const wasi = {
 
 /** @type {string[]} */
 const fontNames = [];
+
+// Local Font Access API integration
+let localFontsCache = new Map();
+let localFontsSyncBuffer = null;
+let localFontsSyncArray = null;
+
+/**
+ * Initialize Local Font Access API support
+ */
+async function initializeLocalFontAccess() {
+  try {
+    // Create shared buffer for sync communication
+    localFontsSyncBuffer = new SharedArrayBuffer(1024 * 1024); // 1MB for font data transfer
+    localFontsSyncArray = new Int32Array(localFontsSyncBuffer, 0, 4);
+    
+    // Initialize sync array: [status, length, operation, reserved]
+    Atomics.store(localFontsSyncArray, 0, 0); // status: 0=idle, 1=request, 2=response, 3=error
+    Atomics.store(localFontsSyncArray, 1, 0); // data length
+    Atomics.store(localFontsSyncArray, 2, 0); // operation: 0=query, 1=getBlobData
+    Atomics.store(localFontsSyncArray, 3, 0); // reserved
+    
+    console.log('Local Font Access API initialized successfully');
+    return true;
+  } catch (err) {
+    console.warn('Failed to initialize Local Font Access API:', err);
+    return false;
+  }
+}
 
 /**
  * @param {{data: ArrayBuffer, name: string}} params 
@@ -1107,6 +1270,20 @@ function _pdfDestFromDest(dest, docHandle) {
 }
 
 /**
+ * Initialize Local Font Access API
+ * @param {{syncBuffer: SharedArrayBuffer}} params
+ */
+function initLocalFontAccess(params) {
+  if (params.syncBuffer) {
+    localFontsSyncBuffer = params.syncBuffer;
+    localFontsSyncArray = new Int32Array(localFontsSyncBuffer, 0, 4);
+    console.log('Local Font Access API initialized with shared buffer');
+    return { message: 'Local Font Access API initialized' };
+  }
+  return { error: 'No sync buffer provided' };
+}
+
+/**
  * Functions that can be called from the main thread
  */
 const functions = {
@@ -1121,6 +1298,7 @@ const functions = {
   renderPage,
   loadText,
   loadLinks,
+  initLocalFontAccess,
 };
 
 function handleRequest(data) {
@@ -1164,6 +1342,7 @@ let messagesBeforeInitialized = [];
 
 console.log(`PDFium worker initialized: ${self.location.href}`);
 
+initializeLocalFontAccess();
 
 /**
  * Entrypoint

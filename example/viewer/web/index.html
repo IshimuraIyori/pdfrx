@@ -35,8 +35,12 @@
 
   <title>example</title>
   <link rel="manifest" href="manifest.json">
+  <script src="coi-serviceworker.js"></script>
 </head>
 <body>
+  <script>
+  console.log(`SharedArrayBuffer enabled: ${typeof SharedArrayBuffer !== 'undefined' ? 'yes' : 'no'}`);
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
