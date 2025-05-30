@@ -181,6 +181,59 @@ class FileSystemEmulator {
    */
   openFile(dirfd, fileNamePtr, flags, mode) {
     const fn = StringUtils.utf8BytesToString(new Uint8Array(Pdfium.memory.buffer, fileNamePtr, 2048));
+
+    // Check if this is a font file request in /usr/share/fonts
+    if (fn === '/usr/share/fonts') {
+      console.log('Opening /usr/share/fonts directory');
+      return 10000;
+    } else if (fn.startsWith('/usr/share/fonts/')) {
+      const fontFileName = fn.substring('/usr/share/fonts/'.length);
+      console.log(`Opening font file: ${fontFileName}`);
+      // Send a message to the main thread to request the font
+      // This is async, so we must block until we get the data (simulate sync with Atomics)
+      if (!self.fontSyncBuffer) {
+        self.fontSyncBuffer = new SharedArrayBuffer(8 * 1024 * 1024); // 8MB buffer
+        self.fontSyncView = new Uint8Array(self.fontSyncBuffer);
+        self.fontSyncStatus = new Int32Array(self.fontSyncBuffer, 0, 1);
+      }
+      // Clear status
+      Atomics.store(self.fontSyncStatus, 0, 0);
+      // Request font from main thread
+      postMessage({ type: 'font-request', fontName: fontFileName, buffer: self.fontSyncBuffer }, [self.fontSyncBuffer]);
+      // Wait for response (status = 1)
+      const timeout = 5000;
+      const start = Date.now();
+      while (Atomics.load(self.fontSyncStatus, 0) === 0) {
+        if (Date.now() - start > timeout) {
+          console.warn('Font request timeout for', fontFileName);
+          break;
+        }
+        Atomics.wait(self.fontSyncStatus, 0, 0, 10);
+      }
+      // If font data was written, register it
+      const dataLength = Atomics.load(self.fontSyncStatus, 0);
+      if (dataLength > 0) {
+        const fontData = self.fontSyncBuffer.slice(4, 4 + dataLength);
+        this.registerFileWithData(fn, fontData);
+      }
+    }
+
+    if (!self.prevOnMessage) {
+      self.prevOnMessage = self.onmessage;
+      self.onmessage = function(event) {
+        const data = event.data;
+        if (data && data.type === 'font-response' && data.fontData && self.fontSyncBuffer) {
+          // Write font data into the buffer
+          const fontBytes = new Uint8Array(data.fontData);
+          self.fontSyncView.set(fontBytes, 4); // leave first 4 bytes for status/length
+          Atomics.store(self.fontSyncStatus, 0, fontBytes.length);
+          Atomics.notify(self.fontSyncStatus, 0);
+          return;
+        }
+        self.prevOnMessage(event);
+      };
+    }
+
     const funcs = this.fn2context[fn];
     if (funcs) {
       const fd = ++this.fdAssignedLast;
@@ -323,6 +376,14 @@ class FileSystemEmulator {
   getdents64(fd, dirp, count) {
     /** @type {DirectoryFileDescriptorContext} */
     const context = this.fd2context[fd];
+    console.log(`getdents64: ${context.fileName}, dirp: ${dirp}, count: ${count}`);
+    
+    // If listing /usr/share/fonts directory, include local fonts
+    if (context && context.fileName === '/usr/share/fonts') {
+      console.log('Directory listing requested for /usr/share/fonts, including local fonts');
+      this.populateLocalFontsDirectory();
+    }
+
     const entries = context.entries;
     if (entries == null) return 0;
     let written = 0;
@@ -357,91 +418,7 @@ class FileSystemEmulator {
     }
     return written;
   }
-};
 
-/**
- * Enhanced FileSystemEmulator with Local Font Access API support
- */
-class LocalFontAwareFileSystemEmulator extends FileSystemEmulator {
-  /**
-   * Override openFile to intercept font requests
-   */
-  openFile(dirfd, fileNamePtr, flags, mode) {
-    const fn = StringUtils.utf8BytesToString(new Uint8Array(Pdfium.memory.buffer, fileNamePtr, 2048));
-    
-    // Check if this is a font file request in /usr/share/fonts
-    if (fn === '/usr/share/fonts') {
-      // Populate the fonts directory with local fonts
-      this.populateLocalFontsDirectory();
-      return 10000;
-    } else if (fn.startsWith('/usr/share/fonts/')) {
-      const fontFileName = fn.substring('/usr/share/fonts/'.length);
-      // Send a message to the main thread to request the font
-      // This is async, so we must block until we get the data (simulate sync with Atomics)
-      if (!self.fontSyncBuffer) {
-        self.fontSyncBuffer = new SharedArrayBuffer(8 * 1024 * 1024); // 8MB buffer
-        self.fontSyncView = new Uint8Array(self.fontSyncBuffer);
-        self.fontSyncStatus = new Int32Array(self.fontSyncBuffer, 0, 1);
-      }
-      // Clear status
-      Atomics.store(self.fontSyncStatus, 0, 0);
-      // Request font from main thread
-      postMessage({ type: 'font-request', fontName: fontFileName, buffer: self.fontSyncBuffer }, [self.fontSyncBuffer]);
-      // Wait for response (status = 1)
-      const timeout = 5000;
-      const start = Date.now();
-      while (Atomics.load(self.fontSyncStatus, 0) === 0) {
-        if (Date.now() - start > timeout) {
-          console.warn('Font request timeout for', fontFileName);
-          break;
-        }
-        Atomics.wait(self.fontSyncStatus, 0, 0, 10);
-      }
-      // If font data was written, register it
-      const dataLength = Atomics.load(self.fontSyncStatus, 0);
-      if (dataLength > 0) {
-        const fontData = self.fontSyncBuffer.slice(4, 4 + dataLength);
-        this.registerFileWithData(fn, fontData);
-      }
-    }
-
-    if (!self.prevOnMessage) {
-      self.prevOnMessage = self.onmessage;
-      self.onmessage = function(event) {
-        const data = event.data;
-        if (data && data.type === 'font-response' && data.fontData && self.fontSyncBuffer) {
-          // Write font data into the buffer
-          const fontBytes = new Uint8Array(data.fontData);
-          self.fontSyncView.set(fontBytes, 4); // leave first 4 bytes for status/length
-          Atomics.store(self.fontSyncStatus, 0, fontBytes.length);
-          Atomics.notify(self.fontSyncStatus, 0);
-          return;
-        }
-        self.prevOnMessage(event);
-      };
-    }
-    
-    // Fallback to original implementation
-    return super.openFile(dirfd, fileNamePtr, flags, mode);
-  }
-  
-  /**
-   * Override getdents64 to include local fonts in directory listing
-   */
-  getdents64(fd, dirp, count) {
-    const context = this.fd2context[fd];
-
-    console.log(`getdents64: ${context.fileName}, dirp: ${dirp}, count: ${count}`);
-    
-    // If listing /usr/share/fonts directory, include local fonts
-    if (context && context.fileName === '/usr/share/fonts') {
-      console.log('Directory listing requested for /usr/share/fonts, including local fonts');
-      this.populateLocalFontsDirectory();
-    }
-    
-    return super.getdents64(fd, dirp, count);
-  }
-  
   /**
    * Populate /usr/share/fonts directory with available local fonts
    */
@@ -492,7 +469,7 @@ class LocalFontAwareFileSystemEmulator extends FileSystemEmulator {
       Atomics.store(localFontsSyncArray, 0, 0);
     }
   }
-}
+};
 
 function _error(e) { return e.stack ? e.stack.toString() : e.toString(); }
 
