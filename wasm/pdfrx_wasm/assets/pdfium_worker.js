@@ -386,11 +386,10 @@ class FileSystemEmulator {
   populateLocalFontsDirectory() {
     try {
       console.log("Requesting local fonts from main thread...");
-      this.fontSync = new SharedArrayBuffer(4);
-      const syncArray = new Int32Array(this.fontSync);
-      Atomics.store(syncArray, 0, 0);
+      this.fontSync = new Int32Array(new SharedArrayBuffer(4));
+      Atomics.store(this.fontSync, 0, 0);
       postMessage({ type: "loadFontList" });
-      Atomics.wait(syncArray, 0, 1);
+      Atomics.wait(this.fontSync, 0, 1);
       console.log("Local fonts loaded: /usr/share/fonts directory is ready.");
     } catch (e) {
       console.error(e);
@@ -1119,9 +1118,8 @@ function _pdfDestFromDest(dest, docHandle) {
 
 function setLocalFontList(params) {
   fileSystem.fontList = params.fonts;
-  const syncArray = new Int32Array(fileSystem.fontSync);
-  Atomics.store(syncArray, 0, 1);
-  Atomics.notify(syncArray, 0);
+  Atomics.store(fileSystem.fontSync, 0, 1);
+  Atomics.notify(fileSystem.fontSync, 0);
   return 0;
 }
 
