@@ -119,6 +119,11 @@ class FileSystemEmulator {
      * @type {number}
      */
     this.fdAssignedLast = 1000;
+    /**
+     * Flag to track if local fonts have been enumerated
+     * @type {boolean}
+     */
+    this.localFontsEnumerated = false;
   }
 
   /**
@@ -181,6 +186,18 @@ class FileSystemEmulator {
    */
   openFile(dirfd, fileNamePtr, flags, mode) {
     const fn = StringUtils.utf8BytesToString(new Uint8Array(Pdfium.memory.buffer, fileNamePtr, 2048));
+    
+    // Check if PDFium is trying to access the fonts directory
+    if (fn === '/usr/share/fonts' && !this.localFontsEnumerated) {
+      this.localFontsEnumerated = true;
+      // Request local fonts from main thread via postMessage
+      postMessage({ 
+        type: 'enumerateLocalFonts', 
+        synchronousResponse: true 
+      });
+      // Note: This will be handled asynchronously, fonts will be registered later
+    }
+    
     const funcs = this.fn2context[fn];
     if (funcs) {
       const fd = ++this.fdAssignedLast;
@@ -468,6 +485,27 @@ async function registerFontFromUrl(params) {
   }
   const data = await response.arrayBuffer();
   registerFont({name, data});
+}
+
+/**
+ * Register multiple local fonts from Local Font Access API
+ * @param {{fonts: Array<{name: string, data: ArrayBuffer}>}} params 
+ */
+function registerLocalFonts(params) {
+  const { fonts } = params;
+  if (!fonts || !Array.isArray(fonts)) {
+    console.warn('No fonts provided for registration');
+    return;
+  }
+  
+  fonts.forEach(font => {
+    if (font.name && font.data) {
+      registerFont({ name: font.name, data: font.data });
+      console.log(`Registered local font: ${font.name}`);
+    }
+  });
+  
+  console.log(`Registered ${fonts.length} local fonts`);
 }
 
 /**
@@ -1112,6 +1150,7 @@ function _pdfDestFromDest(dest, docHandle) {
 const functions = {
   registerFont,
   registerFontFromUrl,
+  registerLocalFonts,
   loadDocumentFromUrl,
   loadDocumentFromData,
   closeDocument,
@@ -1187,6 +1226,14 @@ WebAssembly.instantiateStreaming(fetch(pdfiumWasmUrl), {
 
 onmessage = function(e) {
   const data = e.data;
+  
+  // Handle local font enumeration response
+  if (data && data.type === 'localFontsResponse' && data.fonts) {
+    registerLocalFonts({ fonts: data.fonts });
+    return;
+  }
+  
+  // Handle normal command messages
   if (data && data.id && data.command) {
     if (messagesBeforeInitialized) {
       messagesBeforeInitialized.push(e);
