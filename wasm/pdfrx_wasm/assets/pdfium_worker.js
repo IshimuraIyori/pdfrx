@@ -119,6 +119,14 @@ class FileSystemEmulator {
      * @type {number}
      */
     this.fdAssignedLast = 1000;
+    
+    /**
+     * Local Font Access integration
+     * @type {Object<number, {resolve: function, reject: function}>}
+     */
+    this.pendingFontRequests = {};
+    this.fontRequestId = 0;
+    this.localFontAccessEnabled = false;
   }
 
   /**
@@ -172,6 +180,69 @@ class FileSystemEmulator {
   }
 
   /**
+   * Enable Local Font Access integration
+   */
+  enableLocalFontAccess() {
+    this.localFontAccessEnabled = true;
+  }
+
+  /**
+   * Check if path is a font request to /usr/share/fonts/
+   * @param {string} path File path
+   * @returns {boolean}
+   */
+  isFontPath(path) {
+    return path.startsWith('/usr/share/fonts/') && 
+           /\.(ttf|otf|woff|woff2)$/i.test(path);
+  }
+
+  /**
+   * Request font data from main thread using Local Font Access API
+   * @param {string} fontPath Font file path
+   * @returns {Promise<ArrayBuffer>}
+   */
+  async requestFontData(fontPath) {
+    return new Promise((resolve, reject) => {
+      const requestId = ++this.fontRequestId;
+      this.pendingFontRequests[requestId] = { resolve, reject };
+      
+      // Send font request to main thread
+      postMessage({
+        type: 'fontRequest',
+        requestId,
+        fontPath
+      });
+      
+      // Set timeout to avoid hanging
+      setTimeout(() => {
+        if (this.pendingFontRequests[requestId]) {
+          delete this.pendingFontRequests[requestId];
+          reject(new Error(`Font request timeout for ${fontPath}`));
+        }
+      }, 5000);
+    });
+  }
+
+  /**
+   * Handle font response from main thread
+   * @param {Object} data Response data
+   */
+  handleFontResponse(data) {
+    const { requestId, success, data: fontData, error } = data;
+    const request = this.pendingFontRequests[requestId];
+    
+    if (request) {
+      delete this.pendingFontRequests[requestId];
+      
+      if (success) {
+        request.resolve(fontData);
+      } else {
+        request.reject(new Error(error));
+      }
+    }
+  }
+
+  /**
    * Open a file
    * @param {number} dirfd Directory file descriptor
    * @param {number} fileNamePtr Pointer to buffer that contains filename
@@ -181,14 +252,89 @@ class FileSystemEmulator {
    */
   openFile(dirfd, fileNamePtr, flags, mode) {
     const fn = StringUtils.utf8BytesToString(new Uint8Array(Pdfium.memory.buffer, fileNamePtr, 2048));
+    
+    // Check if this is a font request and Local Font Access is enabled
+    if (this.localFontAccessEnabled && this.isFontPath(fn)) {
+      return this.openFontFile(fn, flags, mode, dirfd);
+    }
+    
     const funcs = this.fn2context[fn];
     if (funcs) {
       const fd = ++this.fdAssignedLast;
-      this.fd2context[fd] = { ...funcs, fd, flags, mode, dirfd, position: 0 };
+      this.fd2context[fd] = { ...funcs, fileName: fn, fd, flags, mode, dirfd, position: 0 };
       return fd;
     }
     console.error(`openFile: not found: ${dirfd}/${fn}`);
     return -1;
+  }
+
+  /**
+   * Open a font file using Local Font Access API
+   * @param {string} fontPath Font file path
+   * @param {number} flags File open flags
+   * @param {number} mode File open mode
+   * @param {number} dirfd Directory file descriptor
+   * @returns {number} File descriptor
+   */
+  openFontFile(fontPath, flags, mode, dirfd) {
+    const fd = ++this.fdAssignedLast;
+    
+    // Create a special context for font files that will load data on demand
+    this.fd2context[fd] = {
+      fileName: fontPath,
+      fd,
+      flags,
+      mode,
+      dirfd,
+      position: 0,
+      size: 0, // Will be set when data is loaded
+      fontData: null, // Will store the font data when loaded
+      isFont: true,
+      
+      read: function(context, buffer) {
+        // This should not be called before font data is loaded
+        if (!context.fontData) {
+          console.error('Font data not loaded yet');
+          return 0;
+        }
+        
+        try {
+          const size = Math.min(buffer.byteLength, context.fontData.byteLength - context.position);
+          const array = new Uint8Array(context.fontData, context.position, size);
+          buffer.set(array);
+          context.position += array.byteLength;
+          return array.length;
+        } catch (err) {
+          console.error(`Font read error: ${_error(err)}`);
+          return 0;
+        }
+      }
+    };
+    
+    // Asynchronously load font data
+    this.loadFontDataAsync(fd, fontPath);
+    
+    return fd;
+  }
+
+  /**
+   * Asynchronously load font data for a file descriptor
+   * @param {number} fd File descriptor
+   * @param {string} fontPath Font file path
+   */
+  async loadFontDataAsync(fd, fontPath) {
+    try {
+      const fontData = await this.requestFontData(fontPath);
+      const context = this.fd2context[fd];
+      if (context && context.isFont) {
+        context.fontData = fontData;
+        context.size = fontData.byteLength;
+      }
+    } catch (error) {
+      console.error(`Failed to load font data for ${fontPath}:`, error);
+      // Remove the file descriptor as it's invalid
+      delete this.fd2context[fd];
+    }
   }
 
   /**
@@ -1187,6 +1333,21 @@ WebAssembly.instantiateStreaming(fetch(pdfiumWasmUrl), {
 
 onmessage = function(e) {
   const data = e.data;
+  
+  // Handle font responses from main thread
+  if (data && data.type === 'fontResponse') {
+    fileSystem.handleFontResponse(data);
+    return;
+  }
+  
+  // Handle enable Local Font Access command
+  if (data && data.type === 'enableLocalFontAccess') {
+    fileSystem.enableLocalFontAccess();
+    console.log('Local Font Access enabled in worker');
+    return;
+  }
+  
+  // Handle normal PDFium commands
   if (data && data.id && data.command) {
     if (messagesBeforeInitialized) {
       messagesBeforeInitialized.push(e);

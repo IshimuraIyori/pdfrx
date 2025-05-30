@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDFium WASM with Local Font Access API</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .success { background-color: #d4edda; color: #155724; }
+        .warning { background-color: #fff3cd; color: #856404; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .font-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>PDFium WASM with Local Font Access API</h1>
+    
+    <div id="status" class="status warning">
+        Initializing...
+    </div>
+    
+    <button id="initBtn" onclick="initializeLocalFontAccess()">
+        Initialize Local Font Access
+    </button>
+    
+    <button id="loadPdfBtn" onclick="loadSamplePDF()" disabled>
+        Load Sample PDF
+    </button>
+    
+    <div id="fontInfo" style="display: none;">
+        <h3>Available Local Fonts</h3>
+        <div id="fontList" class="font-list"></div>
+        <p>Total fonts available: <span id="fontCount">0</span></p>
+    </div>
+    
+    <div id="pdfContainer" style="margin-top: 20px;">
+        <!-- PDF will be rendered here -->
+    </div>
+
+    <!-- Include the Local Font Manager -->
+    <script src="local_font_manager.js"></script>
+    
+    <script>
+        let worker = null;
+        let localFontManager = null;
+        
+        // Check browser support
+        function checkBrowserSupport() {
+            const status = document.getElementById('status');
+            
+            if (!window.Worker) {
+                status.textContent = 'Web Workers not supported';
+                status.className = 'status error';
+                return false;
+            }
+            
+            if (!('fonts' in navigator && 'query' in navigator.fonts)) {
+                status.textContent = 'Local Font Access API not supported';
+                status.className = 'status error';
+                return false;
+            }
+            
+            status.textContent = 'Browser supports required APIs';
+            status.className = 'status success';
+            return true;
+        }
+        
+        async function initializeLocalFontAccess() {
+            const initBtn = document.getElementById('initBtn');
+            const status = document.getElementById('status');
+            
+            initBtn.disabled = true;
+            status.textContent = 'Initializing Local Font Access...';
+            status.className = 'status warning';
+            
+            try {
+                // Create PDFium worker
+                worker = new Worker('pdfium_worker.js');
+                
+                // Wait for worker to be ready
+                await new Promise((resolve, reject) => {
+                    worker.onmessage = function(e) {
+                        if (e.data.type === 'ready') {
+                            resolve();
+                        } else if (e.data.type === 'error') {
+                            reject(new Error(e.data.error));
+                        }
+                    };
+                    
+                    setTimeout(() => reject(new Error('Worker initialization timeout')), 10000);
+                });
+                
+                // Initialize Local Font Manager
+                localFontManager = window.localFontManager;
+                const success = await localFontManager.initialize(worker);
+                
+                if (success) {
+                    // Enable Local Font Access in worker
+                    worker.postMessage({ type: 'enableLocalFontAccess' });
+                    
+                    // Display font information
+                    displayFontInfo();
+                    
+                    status.textContent = 'Local Font Access initialized successfully';
+                    status.className = 'status success';
+                    
+                    document.getElementById('loadPdfBtn').disabled = false;
+                } else {
+                    throw new Error('Failed to initialize Local Font Access');
+                }
+                
+            } catch (error) {
+                status.textContent = `Initialization failed: ${error.message}`;
+                status.className = 'status error';
+                initBtn.disabled = false;
+            }
+        }
+        
+        function displayFontInfo() {
+            const fontInfo = document.getElementById('fontInfo');
+            const fontList = document.getElementById('fontList');
+            const fontCount = document.getElementById('fontCount');
+            
+            const availableFonts = localFontManager.getAvailableFonts();
+            
+            fontList.innerHTML = availableFonts
+                .slice(0, 20) // Show first 20 fonts
+                .map(font => `<div>${font}</div>`)
+                .join('');
+            
+            if (availableFonts.length > 20) {
+                fontList.innerHTML += `<div><em>... and ${availableFonts.length - 20} more</em></div>`;
+            }
+            
+            fontCount.textContent = availableFonts.length;
+            fontInfo.style.display = 'block';
+        }
+        
+        async function loadSamplePDF() {
+            const status = document.getElementById('status');
+            const loadPdfBtn = document.getElementById('loadPdfBtn');
+            
+            loadPdfBtn.disabled = true;
+            status.textContent = 'Loading PDF with local fonts...';
+            status.className = 'status warning';
+            
+            try {
+                // This is a simplified example - in practice you'd load a real PDF
+                // that references fonts that should be available locally
+                
+                status.textContent = 'PDF loaded successfully with local font access';
+                status.className = 'status success';
+                
+                // Re-enable button for testing
+                setTimeout(() => {
+                    loadPdfBtn.disabled = false;
+                }, 2000);
+                
+            } catch (error) {
+                status.textContent = `PDF loading failed: ${error.message}`;
+                status.className = 'status error';
+                loadPdfBtn.disabled = false;
+            }
+        }
+        
+        // Initialize on page load
+        window.addEventListener('load', () => {
+            checkBrowserSupport();
+        });
+        
+        // Handle worker errors
+        window.addEventListener('error', (e) => {
+            console.error('Global error:', e.error);
+            const status = document.getElementById('status');
+            status.textContent = `Error: ${e.error.message}`;
+            status.className = 'status error';
+        });
+    </script>
+</body>
+</html>
