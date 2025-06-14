@@ -4,10 +4,10 @@ import 'dart:collection';
 import 'dart:math';
 import 'dart:ui' as ui;
 
+import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:synchronized/extension.dart';
@@ -224,8 +224,14 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
   // Changes to the stream rebuilds the viewer
   final _updateStream = BehaviorSubject<Matrix4>();
 
-  final _selectables = SplayTreeMap<int, PdfPageTextSelectable>();
-  Timer? _selectionChangedThrottleTimer;
+  final _textCache = <int, PdfPageText?>{};
+  final _textSelection = SplayTreeMap<int, PdfTextRanges>();
+  Timer? _textSelectionChangedThrottleTimer;
+  final double _textSelectionThumbSize = 20.0;
+  final double _hitTestMargin = 3.0;
+  Offset? _textSelectFrom, _textSelectTo, _textSelectAnchor;
+  Rect? _selectionRect;
+  _SelectionHandle _selectingOnProgress = _SelectionHandle.none;
 
   Timer? _interactionEndedTimer;
   bool _isInteractionGoingOn = false;
@@ -288,11 +294,14 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
   void _onDocumentChanged() async {
     _layout = null;
 
-    _selectionChangedThrottleTimer?.cancel();
+    _textSelectionChangedThrottleTimer?.cancel();
     _stopInteraction();
     _releaseAllImages();
     _canvasLinkPainter.resetAll();
+    _textCache.clear();
+    _clearAllTextSelections(invalidate: false);
     _pageNumber = null;
+    _gotoTargetPageNumber = null;
     _initialized = false;
     _txController.removeListener(_onMatrixChanged);
     _controller?._attach(null);
@@ -318,6 +327,31 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
     }
 
     _notifyOnDocumentChanged();
+    _loadDelayed();
+  }
+
+  /// How long to wait before loading the trailing pages after the initial page load.
+  ///
+  /// This is to ensure that the initial page is displayed quickly, and the trailing pages are loaded in the background.
+  static const _trailingPageLoadingDelay = Duration(milliseconds: kIsWeb ? 200 : 100);
+
+  /// How long to wait before loading the page image.
+  static const _pageImageCachingDelay = Duration(milliseconds: kIsWeb ? 100 : 20);
+  static const _partialImageLoadingDelay = Duration(milliseconds: kIsWeb ? 200 : 50);
+
+  Future<void> _loadDelayed() async {
+    // To make the page image loading more smooth, delay the loading of pages
+    await Future.delayed(_trailingPageLoadingDelay);
+
+    final stopwatch = Stopwatch()..start();
+    await _document?.loadPagesProgressively((pageNumber, totalPageCount, document) {
+      if (document == _document && mounted) {
+        debugPrint('PdfViewer: Loaded page $pageNumber of $totalPageCount in ${stopwatch.elapsedMilliseconds} ms');
+        _invalidate();
+        return true;
+      }
+      return false;
+    }, data: _document);
   }
 
   void _notifyOnDocumentChanged() {
@@ -328,7 +362,7 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
 
   @override
   void dispose() {
-    _selectionChangedThrottleTimer?.cancel();
+    _textSelectionChangedThrottleTimer?.cancel();
     _interactionEndedTimer?.cancel();
     _cancelAllPendingRenderings();
     _animController.dispose();
@@ -365,9 +399,6 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
         child: widget.params.loadingBannerBuilder?.call(context, listenable.bytesDownloaded, listenable.totalBytes),
       );
     }
-    Widget selectableRegionInjector(Widget child) =>
-        widget.params.selectableRegionInjector?.call(context, child) ??
-        (widget.params.enableTextSelection ? SelectionArea(child: child) : child);
 
     return Container(
       color: widget.params.backgroundColor,
@@ -377,42 +408,70 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
         child: StreamBuilder(
           stream: _updateStream,
           builder: (context, snapshot) {
-            return selectableRegionInjector(
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  _updateLayout(Size(constraints.maxWidth, constraints.maxHeight));
-                  return Stack(
-                    children: [
-                      iv.InteractiveViewer(
-                        transformationController: _txController,
-                        constrained: false,
-                        boundaryMargin: widget.params.boundaryMargin ?? const EdgeInsets.all(double.infinity),
-                        maxScale: widget.params.maxScale,
-                        minScale: minScale,
-                        panAxis: widget.params.panAxis,
-                        panEnabled: widget.params.panEnabled,
-                        scaleEnabled: widget.params.scaleEnabled,
-                        onInteractionEnd: _onInteractionEnd,
-                        onInteractionStart: _onInteractionStart,
-                        onInteractionUpdate: widget.params.onInteractionUpdate,
-                        interactionEndFrictionCoefficient: widget.params.interactionEndFrictionCoefficient,
-                        onWheelDelta: widget.params.scrollByMouseWheel != null ? _onWheelDelta : null,
-                        // PDF pages
-                        child: CustomPaint(
-                          foregroundPainter: _CustomPainter.fromFunctions(_customPaint),
-                          size: _layout!.documentSize,
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                _updateLayout(Size(constraints.maxWidth, constraints.maxHeight));
+                return Stack(
+                  children: [
+                    iv.InteractiveViewer(
+                      transformationController: _txController,
+                      constrained: false,
+                      boundaryMargin: widget.params.boundaryMargin ?? const EdgeInsets.all(double.infinity),
+                      maxScale: widget.params.maxScale,
+                      minScale: minScale,
+                      panAxis: widget.params.panAxis,
+                      panEnabled: widget.params.panEnabled,
+                      scaleEnabled: widget.params.scaleEnabled,
+                      onInteractionEnd: _onInteractionEnd,
+                      onInteractionStart: _onInteractionStart,
+                      onInteractionUpdate: widget.params.onInteractionUpdate,
+                      interactionEndFrictionCoefficient: widget.params.interactionEndFrictionCoefficient,
+                      onWheelDelta: widget.params.scrollByMouseWheel != null ? _onWheelDelta : null,
+                      // PDF pages
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.move,
+                        hitTestBehavior: HitTestBehavior.deferToChild,
+                        child: GestureDetector(
+                          onPanStart: _onSelectionHandlesPanStart,
+                          onPanUpdate: _onSelectionHandlesPanUpdate,
+                          onPanEnd: _onSelectionHandlesPanEnd,
+                          child: CustomPaint(
+                            foregroundPainter: _CustomPainter.fromFunctions(
+                              _paintSelectionHandles,
+                              hitTestFunction: (p) => _hitTestForSelectionHandles(p) != _SelectionHandle.none,
+                            ),
+                            child: MouseRegion(
+                              cursor: SystemMouseCursors.text,
+                              hitTestBehavior: HitTestBehavior.deferToChild,
+                              child: GestureDetector(
+                                onTapDown: _textTap,
+                                onDoubleTapDown: _textDoubleTap,
+                                onLongPressStart: _textLongPress,
+                                onPanStart: _onTextPanStart,
+                                onPanUpdate: _onTextPanUpdate,
+                                onPanEnd: _onTextPanEnd,
+                                child: CustomPaint(
+                                  foregroundPainter: _CustomPainter.fromFunctions(
+                                    _paintPages,
+                                    hitTestFunction: _hitTestForTextSelection,
+                                  ),
+                                  size: _layout!.documentSize,
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                      ..._buildPageOverlayWidgets(context),
-                      if (_canvasLinkPainter.isEnabled)
-                        SelectionContainer.disabled(child: _canvasLinkPainter.linkHandlingOverlay(_viewSize!)),
-                      if (widget.params.viewerOverlayBuilder != null)
-                        ...widget.params.viewerOverlayBuilder!(context, _viewSize!, _canvasLinkPainter._handleLinkTap)
-                            .map((e) => SelectionContainer.disabled(child: e)),
-                    ],
-                  );
-                },
-              ),
+                    ),
+                    ..._buildPageOverlayWidgets(context),
+                    if (_canvasLinkPainter.isEnabled)
+                      SelectionContainer.disabled(child: _canvasLinkPainter.linkHandlingOverlay(_viewSize!)),
+                    if (widget.params.viewerOverlayBuilder != null)
+                      ...widget.params.viewerOverlayBuilder!(context, _viewSize!, _canvasLinkPainter._handleLinkTap)
+                          .map((e) => SelectionContainer.disabled(child: e)),
+                  ],
+                );
+              },
             );
           },
         ),
@@ -710,20 +769,13 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
   static bool _areZoomsAlmostIdentical(double z1, double z2) => (z1 - z2).abs() < 0.01;
 
   List<Widget> _buildPageOverlayWidgets(BuildContext context) {
-    _selectables.clear();
-
     final renderBox = context.findRenderObject();
     if (renderBox is! RenderBox) return [];
 
     final linkWidgets = <Widget>[];
-    final textWidgets = <Widget>[];
     final overlayWidgets = <Widget>[];
     final targetRect = _getCacheExtentRect();
-    final isTextSelectionEnabled =
-        (widget.params.enableTextSelection ||
-            widget.params.selectableRegionInjector != null ||
-            widget.params.perPageSelectableRegionInjector != null) &&
-        _document!.permissions?.allowsCopying != false;
+    final isTextSelectionEnabled = widget.params.enableTextSelection && _document!.permissions?.allowsCopying != false;
 
     for (int i = 0; i < _document!.pages.length; i++) {
       final rect = _layout!.pageLayouts[i];
@@ -747,35 +799,10 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
                       child: child,
                       onPointerSignal: (event) {
                         if (event is PointerScrollEvent) {
-                          _onWheelDelta(event.scrollDelta);
+                          _onWheelDelta(event);
                         }
                       },
                     ),
-              ),
-            ),
-          );
-        }
-
-        Widget perPageSelectableRegionInjector(Widget child) =>
-            widget.params.perPageSelectableRegionInjector?.call(context, child, page, rectExternal) ?? child;
-
-        if (isTextSelectionEnabled && _document!.permissions?.allowsCopying != false) {
-          textWidgets.add(
-            Positioned(
-              key: Key('#__pageTextOverlay__:${page.pageNumber}'),
-              left: rectExternal.left,
-              top: rectExternal.top,
-              width: rectExternal.width,
-              height: rectExternal.height,
-              child: perPageSelectableRegionInjector(
-                PdfPageTextOverlay(
-                  selectables: _selectables,
-                  enabled: !_isInteractionGoingOn,
-                  page: page,
-                  pageRect: rectExternal,
-                  onTextSelectionChange: _onSelectionChange,
-                  selectionColor: DefaultSelectionStyle.of(context).selectionColor!,
-                ),
               ),
             ),
           );
@@ -797,40 +824,19 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
       }
     }
 
-    Widget selectableRegionInjector(Widget child) => child;
-
-    return [
-      if (textWidgets.isNotEmpty)
-        selectableRegionInjector(
-          Listener(
-            behavior: HitTestBehavior.translucent,
-            // FIXME: Selectable absorbs wheel events.
-            onPointerSignal: (event) {
-              if (event is PointerScrollEvent) {
-                _onWheelDelta(event.scrollDelta);
-              }
-            },
-            child: Stack(children: textWidgets),
-          ),
-        ),
-      ...linkWidgets,
-      ...overlayWidgets,
-    ];
+    return [...linkWidgets, ...overlayWidgets];
   }
 
-  void _clearAllTextSelections() {
-    for (final s in _selectables.values) {
-      s.dispatchSelectionEvent(const ClearSelectionEvent());
-    }
+  void _clearAllTextSelections({bool invalidate = true}) {
+    _textSelectFrom = _textSelectTo = null;
+    _updateTextSelection(invalidate: invalidate);
   }
 
-  void _onSelectionChange(PdfTextRanges selection) {
-    _selectionChangedThrottleTimer?.cancel();
-    _selectionChangedThrottleTimer = Timer(const Duration(milliseconds: 300), () {
-      if (!mounted || !_selectables.containsKey(selection.pageNumber)) return;
-      widget.params.onTextSelectionChange?.call(
-        _selectables.values.map((s) => s.selectedRanges).where((s) => s.isNotEmpty).toList(),
-      );
+  void _onSelectionChange() {
+    _textSelectionChangedThrottleTimer?.cancel();
+    _textSelectionChangedThrottleTimer = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+      widget.params.onTextSelectionChange?.call(_textSelection.values.toList());
     });
   }
 
@@ -873,7 +879,7 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
   }
 
   /// [_CustomPainter] calls the function to paint PDF pages.
-  void _customPaint(ui.Canvas canvas, ui.Size size) {
+  void _paintPages(ui.Canvas canvas, ui.Size size) {
     final targetRect = _getCacheExtentRect();
     final scale = MediaQuery.of(context).devicePixelRatio * _currentZoom;
 
@@ -952,6 +958,26 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
         );
       }
 
+      final selectionColor =
+          Theme.of(context).textSelectionTheme.selectionColor ?? DefaultSelectionStyle.of(context).selectionColor!;
+      final text = _getCachedTextOrDelayLoadText(page.pageNumber);
+      if (text != null) {
+        final selectionInPage = _textSelection[page.pageNumber];
+        if (selectionInPage != null && selectionInPage.isNotEmpty) {
+          for (final range in selectionInPage.ranges) {
+            final f = range.toTextRangeWithFragments(text);
+            if (f != null) {
+              canvas.drawRect(
+                f.bounds.toRectInPageRect(page: page, pageRect: rect),
+                Paint()
+                  ..color = selectionColor
+                  ..style = PaintingStyle.fill,
+              );
+            }
+          }
+        }
+      }
+
       if (_canvasLinkPainter.isEnabled) {
         _canvasLinkPainter.paintLinkHighlights(canvas, rect, page);
       }
@@ -970,6 +996,167 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
         }
       }
     }
+  }
+
+  /// Loads text for the specified page number.
+  ///
+  /// If the text is not loaded yet, it will be loaded asynchronously
+  /// and [onTextLoaded] callback will be called when the text is loaded.
+  /// If [onTextLoaded] is not provided, the widget will be rebuilt when the text is loaded.
+  PdfPageText? _getCachedTextOrDelayLoadText(int pageNumber, {void Function()? onTextLoaded}) {
+    if (_textCache.containsKey(pageNumber)) return _textCache[pageNumber];
+    _loadTextAsync(
+      pageNumber,
+      onTextLoaded:
+          onTextLoaded ??
+          () {
+            if (mounted) {
+              setState(() {});
+            }
+          },
+    );
+    return null;
+  }
+
+  Future<PdfPageText> _loadTextAsync(int pageNumber, {void Function()? onTextLoaded}) async {
+    if (_textCache.containsKey(pageNumber)) return _textCache[pageNumber]!;
+    return await synchronized(() async {
+      if (_textCache.containsKey(pageNumber)) return _textCache[pageNumber]!;
+      final page = _document!.pages[pageNumber - 1];
+      final text = await page.loadText();
+      _textCache[pageNumber] = text;
+      if (onTextLoaded != null) {
+        onTextLoaded();
+      }
+      return text;
+    });
+  }
+
+  bool _hitTestForTextSelection(ui.Offset position) {
+    for (int i = 0; i < _document!.pages.length; i++) {
+      final pageRect = _layout!.pageLayouts[i];
+      if (!pageRect.contains(position)) continue;
+      final page = _document!.pages[i];
+      final text = _getCachedTextOrDelayLoadText(
+        page.pageNumber,
+        onTextLoaded: () {},
+      ); // the routine may be called multiple times, we can ignore the chance
+      if (text == null) continue;
+      for (final f in text.fragments) {
+        final rect = f.bounds.toRectInPageRect(page: page, pageRect: pageRect).inflate(_hitTestMargin);
+        if (rect.contains(position)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  void _paintSelectionHandles(ui.Canvas canvas, ui.Size size) {
+    final selectionColor =
+        Theme.of(context).textSelectionTheme.selectionColor ?? DefaultSelectionStyle.of(context).selectionColor!;
+    final selectionColorSolid = selectionColor.withAlpha(255);
+    if (_textSelectFrom != null && _textSelectTo != null) {
+      if (_selectingOnProgress == _SelectionHandle.free) {
+        canvas.drawRect(
+          Rect.fromPoints(_textSelectFrom!, _textSelectTo!),
+          Paint()
+            ..color = selectionColorSolid
+            ..style = PaintingStyle.stroke,
+        );
+      } else {
+        if (_selectionRect != null) {
+          final r = _textSelectionThumbSize / _controller!.currentZoom;
+          canvas.drawRect(
+            _selectionRect!,
+            Paint()
+              ..color = selectionColorSolid
+              ..style = PaintingStyle.stroke,
+          );
+
+          canvas.save();
+          canvas.translate(_selectionRect!.left, _selectionRect!.top);
+          canvas.scale(r, r);
+          canvas.drawPath(
+            _selectionHandlePath,
+            Paint()
+              ..color = selectionColorSolid
+              ..style = PaintingStyle.fill,
+          );
+          canvas.restore();
+
+          canvas.save();
+          canvas.translate(_selectionRect!.right, _selectionRect!.bottom);
+          canvas.scale(-r, -r);
+          canvas.drawPath(
+            _selectionHandlePath,
+            Paint()
+              ..color = selectionColorSolid
+              ..style = PaintingStyle.fill,
+          );
+          canvas.restore();
+        }
+      }
+    }
+  }
+
+  _SelectionHandle _hitTestForSelectionHandles(ui.Offset position) {
+    if (_textSelectFrom != null && _textSelectTo != null) {
+      final sr = _selectionRect;
+      if (sr != null) {
+        final diam = _textSelectionThumbSize * 2 / _controller!.currentZoom;
+        final rect1 = Rect.fromLTRB(sr.left - diam, sr.top - diam, sr.left, sr.top);
+        if (rect1.contains(position)) return _SelectionHandle.topLeft;
+        final rect2 = Rect.fromLTRB(sr.right, sr.bottom, sr.right + diam, sr.bottom + diam);
+        if (rect2.contains(position)) return _SelectionHandle.bottomRight;
+      }
+    }
+    return _SelectionHandle.none;
+  }
+
+  static final _selectionHandlePath =
+      Path()
+        ..moveTo(0, 0)
+        ..lineTo(-1, 0)
+        ..addArc(Rect.fromLTRB(-2, -2, 0, 0), pi / 2, pi * 3 / 2)
+        ..lineTo(0, 0);
+
+  void _onSelectionHandlesPanStart(DragStartDetails details) {
+    if (_isInteractionGoingOn) return;
+    _selectingOnProgress = _hitTestForSelectionHandles(details.localPosition);
+    final anchor = Offset(_txController.value.x, _txController.value.y);
+    if (_selectingOnProgress == _SelectionHandle.topLeft) {
+      _textSelectAnchor = anchor + _selectionRect!.topLeft - details.localPosition;
+      _textSelectFrom = _selectionRect!.topLeft;
+    } else if (_selectingOnProgress == _SelectionHandle.bottomRight) {
+      _textSelectAnchor = anchor + _selectionRect!.bottomRight - details.localPosition;
+      _textSelectTo = _selectionRect!.bottomRight;
+    } else {
+      return;
+    }
+    _updateTextSelection();
+  }
+
+  void _updateSelectionHandlesPan({Offset? panTo}) {
+    if (_selectingOnProgress == _SelectionHandle.topLeft) {
+      _textSelectFrom =
+          (panTo ?? _textSelectFrom!) + _textSelectAnchor! - Offset(_txController.value.x, _txController.value.y);
+    } else if (_selectingOnProgress == _SelectionHandle.bottomRight) {
+      _textSelectTo =
+          (panTo ?? _textSelectTo!) + _textSelectAnchor! - Offset(_txController.value.x, _txController.value.y);
+    } else {
+      return;
+    }
+    _updateTextSelection();
+  }
+
+  void _onSelectionHandlesPanUpdate(DragUpdateDetails details) {
+    _updateSelectionHandlesPan(panTo: details.localPosition);
+  }
+
+  void _onSelectionHandlesPanEnd(DragEndDetails details) {
+    _updateSelectionHandlesPan(panTo: details.localPosition);
+    _selectingOnProgress = _SelectionHandle.none;
   }
 
   PdfPageLayout _layoutPages(List<PdfPage> pages, PdfViewerParams params) {
@@ -1003,7 +1190,7 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
     _pageImageRenderingTimers[page.pageNumber]?.cancel();
     if (!mounted) return;
     _pageImageRenderingTimers[page.pageNumber] = Timer(
-      const Duration(milliseconds: 50),
+      _pageImageCachingDelay,
       () => _cachePageImage(page, width, height, scale),
     );
   }
@@ -1012,6 +1199,7 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
     if (!mounted) return;
     if (_pageImages[page.pageNumber]?.scale == scale) return;
     final cancellationToken = page.createCancellationToken();
+
     _addCancellationToken(page.pageNumber, cancellationToken);
     await synchronized(() async {
       if (!mounted || cancellationToken.isCanceled) return;
@@ -1021,6 +1209,7 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
         fullHeight: height,
         backgroundColor: Colors.white,
         annotationRenderingMode: widget.params.annotationRenderingMode,
+        flags: widget.params.limitRenderingCache ? PdfPageRenderFlags.limitedImageCache : PdfPageRenderFlags.none,
         cancellationToken: cancellationToken,
       );
       if (img == null) return;
@@ -1045,7 +1234,7 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
     _pageImagePartialRenderingRequests[page.pageNumber]?.cancel();
     final cancellationToken = page.createCancellationToken();
     _pageImagePartialRenderingRequests[page.pageNumber] = _PdfPartialImageRenderingRequest(
-      Timer(const Duration(milliseconds: 300), () async {
+      Timer(_partialImageLoadingDelay, () async {
         if (!mounted || cancellationToken.isCanceled) return;
         final newImage = await _createPartialImage(page, scale, cancellationToken);
         if (_pageImagesPartial[page.pageNumber] == newImage) return;
@@ -1082,6 +1271,7 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
       fullHeight: pageRect.height * scale,
       backgroundColor: Colors.white,
       annotationRenderingMode: widget.params.annotationRenderingMode,
+      flags: widget.params.limitRenderingCache ? PdfPageRenderFlags.limitedImageCache : PdfPageRenderFlags.none,
       cancellationToken: cancellationToken,
     );
     if (img == null) return null;
@@ -1122,11 +1312,11 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
     }
   }
 
-  void _onWheelDelta(Offset delta) {
+  void _onWheelDelta(PointerScrollEvent event) {
     _startInteraction();
     final m = _txController.value.clone();
-    final dx = -delta.dx * widget.params.scrollByMouseWheel!;
-    final dy = -delta.dy * widget.params.scrollByMouseWheel!;
+    final dx = -event.scrollDelta.dx * widget.params.scrollByMouseWheel!;
+    final dy = -event.scrollDelta.dy * widget.params.scrollByMouseWheel!;
     if (widget.params.scrollHorizontallyByMouseWheel) {
       m.translate(dy, dx);
     } else {
@@ -1500,6 +1690,195 @@ class _PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMix
   Offset? _documentToGlobal(Offset document) => _localToGlobal(
     document.scale(_currentZoom, _currentZoom).translate(_txController.value.xZoomed, _txController.value.yZoomed),
   );
+
+  void _textTap(TapDownDetails details) {
+    _clearAllTextSelections();
+  }
+
+  void _textDoubleTap(TapDownDetails details) {}
+
+  void _textLongPress(LongPressStartDetails details) {
+    if (_isInteractionGoingOn) return;
+    _selectWord(details.localPosition);
+  }
+
+  void _onTextPanStart(DragStartDetails details) {
+    if (_isInteractionGoingOn) return;
+    _selectingOnProgress = _SelectionHandle.free;
+    _textSelectFrom = details.localPosition;
+    _textSelectAnchor = Offset(_txController.value.x, _txController.value.y);
+    _textSelectTo = null;
+    _updateTextSelection();
+  }
+
+  void _updateTextSelectRectTo({Offset? panTo}) {
+    if (_selectingOnProgress != _SelectionHandle.free) return;
+    _textSelectTo =
+        (panTo ?? _textSelectTo!) + _textSelectAnchor! - Offset(_txController.value.x, _txController.value.y);
+    _updateTextSelection();
+  }
+
+  void _onTextPanUpdate(DragUpdateDetails details) {
+    _updateTextSelectRectTo(panTo: details.localPosition);
+  }
+
+  void _onTextPanEnd(DragEndDetails details) {
+    _updateTextSelectRectTo(panTo: details.localPosition);
+    _selectingOnProgress = _SelectionHandle.none;
+  }
+
+  void _updateTextSelection({bool invalidate = true}) {
+    _textSelection.clear();
+    if (_textSelectFrom != null && _textSelectTo != null) {
+      final selectionRect = Rect.fromPoints(_textSelectFrom!, _textSelectTo!);
+      _selectionRect = null;
+      for (int i = 0; i < _document!.pages.length; i++) {
+        final pageRect = _layout!.pageLayouts[i];
+        if (pageRect.intersect(selectionRect).isEmpty) {
+          continue;
+        }
+
+        final text = _getCachedTextOrDelayLoadText(i + 1, onTextLoaded: _updateTextSelection);
+        if (text == null) continue;
+        final selection = _selectPageTextOfRect(selectionRect, pageRect, _document!.pages[i], text);
+        if (selection == null) continue;
+        //_selectionRect = _selectionRect?.expandToInclude(selection.boundsRect) ?? selection.boundsRect;
+        _textSelection[i + 1] = selection.ranges;
+      }
+      _selectionRect = selectionRect;
+    } else {
+      _selectionRect = null;
+      _textSelection.clear();
+    }
+    if (invalidate) {
+      _notifyTextSelectionChange();
+    }
+  }
+
+  void _notifyTextSelectionChange() {
+    _onSelectionChange();
+    _invalidate();
+  }
+
+  ({PdfTextRanges ranges, Rect boundsRect})? _selectPageTextOfRect(
+    Rect selectionRect,
+    Rect pageRect,
+    PdfPage page,
+    PdfPageText pageText,
+  ) {
+    final fragments = pageText.fragments;
+    final selectionRects = <Rect>[];
+    final sb = StringBuffer();
+
+    int searchLineEnd(int start) {
+      final lastIndex = fragments.length - 1;
+      var last = fragments[start];
+      for (int i = start; i < lastIndex; i++) {
+        final next = fragments[i + 1];
+        if (last.bounds.bottom != next.bounds.bottom) {
+          return i + 1;
+        }
+        last = next;
+      }
+      return fragments.length;
+    }
+
+    Iterable<({Rect rect, String text, PdfTextRange range})> enumerateCharRects(int start, int end) sync* {
+      for (int i = start; i < end; i++) {
+        final fragment = fragments[i];
+        if (fragment.charRects == null) {
+          yield (
+            rect: fragment.bounds.toRectInPageRect(page: page, pageRect: pageRect),
+            text: fragment.text,
+            range: PdfTextRange(start: fragment.index, end: fragment.end),
+          );
+        } else {
+          for (int j = 0; j < fragment.charRects!.length; j++) {
+            yield (
+              rect: fragment.charRects![j].toRectInPageRect(page: page, pageRect: pageRect),
+              text: fragment.text.substring(j, j + 1),
+              range: PdfTextRange(start: fragment.index + j, end: fragment.index + j + 1),
+            );
+          }
+        }
+      }
+    }
+
+    ({Rect? rect, String text, List<PdfTextRange> ranges}) selectChars(int start, int end, Rect lineSelectRect) {
+      Rect? rect;
+      final ranges = <PdfTextRange>[];
+      final sb = StringBuffer();
+      for (final r in enumerateCharRects(start, end)) {
+        if (!r.rect.intersect(lineSelectRect).isEmpty || r.rect.bottom < lineSelectRect.bottom) {
+          sb.write(r.text);
+          ranges.appendRange(r.range);
+          if (rect == null) {
+            rect = r.rect;
+          } else {
+            rect = rect.expandToInclude(r.rect);
+          }
+        }
+      }
+      return (rect: rect, text: sb.toString(), ranges: ranges);
+    }
+
+    final selectedRanges = PdfTextRanges.createEmpty(pageText);
+    int? lastLineEnd;
+    Rect? lastLineStartRect;
+    for (int i = 0; i < fragments.length;) {
+      final bounds = fragments[i].bounds.toRectInPageRect(page: page, pageRect: pageRect);
+      final intersects = !selectionRect.intersect(bounds).isEmpty;
+      if (intersects) {
+        final lineEnd = searchLineEnd(i);
+        final chars = selectChars(
+          lastLineEnd ?? i,
+          lineEnd,
+          lastLineStartRect != null ? lastLineStartRect.expandToInclude(selectionRect) : selectionRect,
+        );
+        lastLineStartRect = bounds;
+        lastLineEnd = i = lineEnd;
+        if (chars.rect == null) continue;
+        sb.write(chars.text);
+        selectionRects.add(chars.rect!);
+        selectedRanges.ranges.appendAllRanges(chars.ranges);
+      } else {
+        i++;
+      }
+    }
+    if (selectedRanges.isEmpty) {
+      return null;
+    }
+
+    return (ranges: selectedRanges, boundsRect: selectionRects.reduce((a, b) => a.expandToInclude(b)));
+  }
+
+  Future<void> _selectWord(Offset offset) async {
+    for (int i = 0; i < _document!.pages.length; i++) {
+      final pageRect = _layout!.pageLayouts[i];
+      if (!pageRect.contains(offset)) {
+        continue;
+      }
+
+      final text = await _loadTextAsync(i + 1);
+      final page = _document!.pages[i];
+      final point = offset
+          .translate(-pageRect.left, -pageRect.top)
+          .toPdfPoint(page: page, scaledPageSize: pageRect.size);
+      final f = text.fragments.firstWhereOrNull((f) => f.bounds.containsPoint(point));
+      if (f == null) {
+        _clearAllTextSelections();
+        return;
+      }
+      _textSelection.clear();
+      _textSelection[i + 1] = PdfTextRanges.createEmpty(text)
+        ..ranges.appendRange(PdfTextRange(start: f.index, end: f.end));
+      _selectionRect = f.bounds.toRectInPageRect(page: page, pageRect: pageRect);
+      _textSelectFrom = _selectionRect!.topLeft;
+      _textSelectTo = _selectionRect!.bottomRight;
+      _textSelectAnchor = Offset(_txController.value.x, _txController.value.y);
+    }
+    _notifyTextSelectionChange();
+  }
 }
 
 class _PdfPartialImageRenderingRequest {
@@ -1538,6 +1917,8 @@ class _PdfViewerTransformationController extends TransformationController {
     super.value = _state._makeMatrixInSafeRange(newValue);
   }
 }
+
+enum _SelectionHandle { none, free, topLeft, bottomRight }
 
 /// Defines page layout.
 class PdfPageLayout {
@@ -1908,7 +2289,7 @@ class PdfViewerController extends ValueListenable<Matrix4> {
   /// Provided to workaround certain widgets eating wheel events. Use with [Listener.onPointerSignal].
   void handlePointerSignalEvent(PointerSignalEvent event) {
     if (event is PointerScrollEvent) {
-      _state._onWheelDelta(event.scrollDelta);
+      _state._onWheelDelta(event);
     }
   }
 
@@ -2004,13 +2385,20 @@ extension RectExt on Rect {
 /// Create a [CustomPainter] from a paint function.
 class _CustomPainter extends CustomPainter {
   /// Create a [CustomPainter] from a paint function.
-  const _CustomPainter.fromFunctions(this.paintFunction);
+  const _CustomPainter.fromFunctions(this.paintFunction, {this.hitTestFunction});
   final void Function(ui.Canvas canvas, ui.Size size) paintFunction;
+  final bool Function(ui.Offset position)? hitTestFunction;
   @override
   void paint(ui.Canvas canvas, ui.Size size) => paintFunction(canvas, size);
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+
+  @override
+  bool hitTest(ui.Offset position) {
+    if (hitTestFunction == null) return false;
+    return hitTestFunction!(position);
+  }
 }
 
 Widget _defaultErrorBannerBuilder(

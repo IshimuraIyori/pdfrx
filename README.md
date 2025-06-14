@@ -16,8 +16,7 @@ A [demo site](https://espresso3389.github.io/pdfrx/) using Flutter Web
 - Windows
 - macOS
 - Linux (even on Raspberry PI)
-- Web
-  - By default, pdfrx uses [PDF.js](https://mozilla.github.io/pdf.js/) but you can enable [Pdfium WASM support](https://github.com/espresso3389/pdfrx/wiki/Enable-Pdfium-WASM-support)
+- Web (WASM)
 
 ## Example Code
 
@@ -53,7 +52,7 @@ Add this to your package's `pubspec.yaml` file and execute `flutter pub get`:
 
 ```yaml
 dependencies:
-  pdfrx: ^1.1.33
+  pdfrx: ^1.2.1
 ```
 
 ### Note for Windows
@@ -62,6 +61,21 @@ dependencies:
 
 The build process internally uses *symbolic links* and it requires Developer Mode to be enabled.
 Without this, you may encounter errors [like this](https://github.com/espresso3389/pdfrx/issues/34).
+
+## Note for Building Release Builds
+
+*Please note that the section is not applicable to Web.*
+
+Because the plugin contains WASM binaries as it's assets and they increase the size of the app regardless of the platform.
+This is normally OK for development or debugging but you may want to remove them when building release builds.
+
+To do this, do `dart run pdfrx:remove_wasm_modules` between `flutter pub get` and `flutter build ...` on your app project's root directory:
+
+```bash
+flutter pub get
+dart run pdfrx:remove_wasm_modules
+flutter build ...
+```
 
 ## Customizations/Features
 
@@ -72,7 +86,7 @@ You can customize the behaviors and the viewer look and feel by configuring [Pdf
 ```dart
 PdfViewer.asset(
   'assets/test.pdf',
-  // Most easiest way to return some password
+  // The easiest way to supply a password
   passwordProvider: () => 'password',
 
   ...

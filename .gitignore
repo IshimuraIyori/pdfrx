@@ -37,4 +37,4 @@ build/
 
 /test/.tmp
 
-CLAUDE.md
+.claude/
