@@ -9,13 +9,36 @@ const pdfiumRelease = 'chromium%2F7202';
 /// Temporary directory for testing.
 final tmpRoot = Directory('${Directory.current.path}/test/.tmp');
 
-/// Test document with all pages.
+/// Test document with all pages.flutte
 Future<void> testDocument(PdfDocument doc) async {
+  await testNamedDest(doc);
+  //await testXfaPackets(doc);
+
   expect(doc.pages.length, greaterThan(0), reason: 'doc.pages.length');
   for (var i = 1; i <= doc.pages.length; i++) {
     await testPage(doc, i);
   }
   doc.dispose();
+}
+
+/// Test named destinations in the document.
+Future<void> testNamedDest(PdfDocument doc) async {
+  final namedDests = await doc.getNamedDests();
+  for (final entry in namedDests.entries) {
+    expect(entry.key, isNotEmpty, reason: 'Named destination name should not be empty');
+    expect(entry.value.pageNumber, greaterThan(0), reason: 'Named destination page number should be greater than 0');
+    final dest = await doc.getNamedDestByName(entry.key);
+    expect(dest, isNotNull, reason: 'doc.getNamedDestByName(${entry.key})');
+  }
+}
+
+Future<void> testXfaPackets(PdfDocument doc) async {
+  final xfaPackets = await doc.getXfaPackets();
+  for (final packet in xfaPackets) {
+    expect(packet.name, isNotEmpty, reason: 'XFA packet name should not be empty');
+    final content = await packet.getContent();
+    expect(content, isNotEmpty, reason: 'XFA packet content should not be empty');
+  }
 }
 
 /// Test a page.

@@ -78,3 +78,17 @@ Future<String> _downloadPdfium(String platform, String arch, String modulePath) 
   await extractArchiveToDisk(archive, tmpDir.path);
   return targetPath;
 }
+
+Future<String> downloadFile(String uri) async {
+  final tmpDir = Directory('${tmpRoot.path}/data');
+  final targetPath = '${tmpDir.path}/${Uri.parse(uri).pathSegments.last}';
+  if (await File(targetPath).exists()) return targetPath;
+  await tmpDir.create(recursive: true);
+
+  final response = await http.Client().get(Uri.parse(uri));
+  if (response.statusCode != 200) {
+    throw Exception('Failed to download: $uri');
+  }
+  await File(targetPath).writeAsBytes(response.bodyBytes);
+  return targetPath;
+}

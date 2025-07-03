@@ -355,6 +355,12 @@ abstract class PdfDocument {
   ///
   /// It does not mean the document contents (or the document files) are identical.
   bool isIdenticalDocumentHandle(Object? other);
+
+  Future<PdfDest?> getNamedDestByName(String name);
+
+  Future<Map<String, PdfDest>> getNamedDests();
+
+  Future<List<PdfXfaPacket>> getXfaPackets();
 }
 
 typedef PdfPageLoadingCallback<T> = FutureOr<bool> Function(int currentPageNumber, int totalPageCount, T? data);
@@ -1329,4 +1335,12 @@ extension OffsetPdfPointExt on Offset {
     final scale = scaledPageSize == null ? 1.0 : page.height / scaledPageSize.height;
     return PdfPoint(dx * scale, page.height - dy * scale).rotateReverse(rotation ?? page.rotation.index, page);
   }
+}
+
+abstract class PdfXfaPacket {
+  /// Name of the XFA packet.
+  String get name;
+
+  /// Content of the XFA packet.
+  Future<String> getContent();
 }

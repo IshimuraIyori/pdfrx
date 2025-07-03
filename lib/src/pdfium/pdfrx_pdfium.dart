@@ -528,6 +528,7 @@ class _PdfDocumentPdfium extends PdfDocument {
 
         final doc = pdfium_bindings.FPDF_DOCUMENT.fromAddress(params.document);
         pdfium.FPDF_CloseDocument(doc);
+        return true;
       }, (formHandle: formHandle.address, formInfo: formInfo.address, document: document.address));
 
       disposeCallback?.call();
@@ -566,6 +567,83 @@ class _PdfDocumentPdfium extends PdfDocument {
       bookmark = pdfium.FPDFBookmark_GetNextSibling(document, bookmark);
     }
     return siblings;
+  }
+
+  @override
+  Future<PdfDest?> getNamedDestByName(String name) async {
+    if (isDisposed) {
+      throw PdfException('Cannot get named destination from disposed document.');
+    }
+    return await (await backgroundWorker).computeWithArena((arena, params) {
+      final document = pdfium_bindings.FPDF_DOCUMENT.fromAddress(params.document);
+      final name = params.name.toUtf8(arena);
+      final dest = pdfium.FPDF_GetNamedDestByName(document, name);
+      if (dest == nullptr) {
+        throw PdfException('Named destination "${params.name}" not found.');
+      }
+      return _pdfDestFromDest(dest, document, arena);
+    }, (document: document.address, name: name));
+  }
+
+  @override
+  Future<Map<String, PdfDest>> getNamedDests() async {
+    if (isDisposed) {
+      throw PdfException('Cannot get named destinations from disposed document.');
+    }
+    return await (await backgroundWorker).computeWithArena((arena, params) {
+      final name2dest = <String, PdfDest>{};
+      final document = pdfium_bindings.FPDF_DOCUMENT.fromAddress(params.document);
+      final count = pdfium.FPDF_CountNamedDests(document);
+      final bufLenBuf = arena.allocate<Long>(sizeOf<Long>());
+      int bufferSize = 1000;
+      var buffer = arena.allocate<Void>(bufferSize);
+      if (buffer == nullptr) {
+        throw PdfException('Failed to allocate memory for named destination buffer (size=$bufferSize).');
+      }
+      for (int i = 0; i < count;) {
+        bufLenBuf.value = bufferSize;
+        final dest = pdfium.FPDF_GetNamedDest(document, i, buffer, bufLenBuf);
+        if (dest == nullptr) {
+          if (bufLenBuf.value < 0) {
+            bufferSize = bufLenBuf.value;
+            arena.free(buffer);
+            buffer = arena.allocate<Void>(bufferSize * 2);
+            if (buffer == nullptr) {
+              throw PdfException('Failed to allocate memory for named destination buffer (size=$bufferSize).');
+            }
+            continue;
+          }
+          final name = buffer.cast<Utf16>().toDartString();
+          final pdfDest = _pdfDestFromDest(dest, document, arena);
+          if (pdfDest != null) {
+            name2dest[name] = pdfDest;
+          }
+          i++;
+        }
+      }
+      return name2dest;
+    }, (document: document.address));
+  }
+
+  @override
+  Future<List<PdfXfaPacket>> getXfaPackets() async {
+    if (isDisposed) {
+      throw PdfException('Cannot get XFA packets from disposed document.');
+    }
+    final packetNames = await (await backgroundWorker).computeWithArena((arena, params) {
+      final document = pdfium_bindings.FPDF_DOCUMENT.fromAddress(params.document);
+      final count = pdfium.FPDF_GetXFAPacketCount(document);
+      final packetNames = <String>[];
+      for (int i = 0; i < count; i++) {
+        final nameBufSize = pdfium.FPDF_GetXFAPacketName(document, i, nullptr, 0);
+        final nameBuf = arena.allocate<Void>(nameBufSize);
+        pdfium.FPDF_GetXFAPacketName(document, i, nameBuf, nameBufSize);
+        final name = nameBuf.cast<Utf16>().toDartString();
+        packetNames.add(name);
+      }
+      return packetNames;
+    }, (document: document.address));
+    return List.generate(packetNames.length, (i) => _PdfXfaPacketImpl(packetNames[i], i, this));
   }
 }
 
@@ -1129,4 +1207,32 @@ PdfDest? _pdfDestFromDest(pdfium_bindings.FPDF_DEST dest, pdfium_bindings.FPDF_D
     return PdfDest(pageIndex + 1, PdfDestCommand.values[type], List.generate(pul.value, (index) => values[index]));
   }
   return null;
+}
+
+class _PdfXfaPacketImpl extends PdfXfaPacket {
+  _PdfXfaPacketImpl(this.name, this._index, this._document);
+
+  @override
+  final String name;
+
+  final int _index;
+  final _PdfDocumentPdfium _document;
+
+  @override
+  Future<String> getContent() async {
+    if (_document.isDisposed) {
+      throw PdfException('Cannot get XFA packet content from disposed document.');
+    }
+    return await (await backgroundWorker).computeWithArena((arena, params) {
+      final document = pdfium_bindings.FPDF_DOCUMENT.fromAddress(params.document);
+      final outBufSize = arena.allocate<UnsignedLong>(sizeOf<UnsignedLong>());
+      final contentBufSize = pdfium.FPDF_GetXFAPacketContent(document, params.index, nullptr, 0, outBufSize);
+      if (contentBufSize < 0) {
+        throw PdfException('Failed to get XFA packet content size.');
+      }
+      final contentBuf = arena.allocate<Void>(contentBufSize);
+      pdfium.FPDF_GetXFAPacketContent(document, params.index, contentBuf, contentBufSize, outBufSize);
+      return contentBuf.cast<Utf8>().toDartString();
+    }, (document: _document.document.address, index: _index));
+  }
 }
