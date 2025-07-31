@@ -112,11 +112,11 @@ abstract class PdfrxEntryFunctions {
     bool withCredentials = false,
   });
 
-  Future<void> reloadFonts();
+  Future<void> reloadFonts(PdfDocument document);
 
-  Future<void> addFontData({required String face, required Uint8List data});
+  Future<void> addFontData(PdfDocument document, {required String face, required Uint8List data});
 
-  Future<void> clearAllFontData();
+  Future<void> clearAllFontData(PdfDocument document);
 }
 
 /// Callback function to notify download progress.

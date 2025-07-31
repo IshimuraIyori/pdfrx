@@ -286,23 +286,31 @@ class PdfrxEntryFunctionsWasmImpl extends PdfrxEntryFunctions {
     }
   }
 
-  @override
-  Future<void> reloadFonts() async {
-    await _init();
-    await _sendCommand('reloadFonts', parameters: {'dummy': true});
+  dynamic _docHandle(PdfDocument document) {
+    return (document as _PdfDocumentWasm).document['docHandle'];
   }
 
   @override
-  Future<void> addFontData({required String face, required Uint8List data}) async {
+  Future<void> reloadFonts(PdfDocument document) async {
+    await _init();
+    await _sendCommand('reloadFonts', parameters: {'docHandle': _docHandle(document)});
+  }
+
+  @override
+  Future<void> addFontData(PdfDocument document, {required String face, required Uint8List data}) async {
     await _init();
     final jsData = data.buffer.toJS;
-    await _sendCommand('addFontData', parameters: {'face': face, 'data': jsData}, transfer: [jsData].toJS);
+    await _sendCommand(
+      'addFontData',
+      parameters: {'docHandle': _docHandle(document), 'face': face, 'data': jsData},
+      transfer: [jsData].toJS,
+    );
   }
 
   @override
-  Future<void> clearAllFontData() async {
+  Future<void> clearAllFontData(PdfDocument document) async {
     await _init();
-    await _sendCommand('clearAllFontData', parameters: {'dummy': true});
+    await _sendCommand('clearAllFontData', parameters: {'docHandle': _docHandle(document)});
   }
 }
 

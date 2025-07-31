@@ -302,14 +302,15 @@ class PdfrxEntryFunctionsImpl implements PdfrxEntryFunctions {
   }
 
   @override
-  Future<void> reloadFonts() => throw UnimplementedError('FIXME: PdfrxEntryFunctions.reloadFonts is not implemented.');
+  Future<void> reloadFonts(PdfDocument document) =>
+      throw UnimplementedError('FIXME: PdfrxEntryFunctions.reloadFonts is not implemented.');
 
   @override
-  Future<void> addFontData({required String face, required Uint8List data}) =>
+  Future<void> addFontData(PdfDocument document, {required String face, required Uint8List data}) =>
       throw UnimplementedError('FIXME: PdfrxEntryFunctions.addFontData is not implemented.');
 
   @override
-  Future<void> clearAllFontData() =>
+  Future<void> clearAllFontData(PdfDocument document) =>
       throw UnimplementedError('FIXME: PdfrxEntryFunctions.clearAllFontData is not implemented.');
 }
 

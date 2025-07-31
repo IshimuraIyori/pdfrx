@@ -1416,9 +1416,10 @@ function _initializeFontEnvironment() {
     const result = Pdfium.invokeFunc(mapFont, (func) =>
       func(sysFontInfoBuffer, weight, bItalic, charset, pitchFamily, face, bExact)
     );
+    const faceName = StringUtils.utf8BytesToString(new Uint8Array(Pdfium.memory.buffer, face));
+    console.log(`MapFont(${faceName}) => ${result}`);
     if (!result) {
       // the font face is missing
-      const faceName = StringUtils.utf8BytesToString(new Uint8Array(Pdfium.memory.buffer, face));
       if (fontNamesToIgnore[faceName] || lastMissingFonts[faceName]) return 0;
       lastMissingFonts[faceName] = {
         face: faceName,
@@ -1438,11 +1439,12 @@ function _initializeFontEnvironment() {
 
 /**
  * Reload fonts in PDFium.
- *
+ * @param {{docHandle: number}} params
+ * 
  * The function is based on the fact that PDFium reloads all the fonts when FPDF_SetSystemFontInfo is called.
  */
-function reloadFonts() {
-  console.log('Reloading system fonts in PDFium...');
+function reloadFonts(params) {
+  console.log(`Reloading system fonts in PDFium for document: ${params.docHandle}...`);
   _initializeFontEnvironment();
   return { message: 'Fonts reloaded' };
 }
@@ -1454,7 +1456,7 @@ let fontFilesId = 0;
 
 /**
  * Add font data to the file system.
- * @param {{face: string, data: ArrayBuffer}} params
+ * @param {{docHandle: number, face: string, data: ArrayBuffer}} params
  */
 function addFontData(params) {
   console.log(`Adding font data for face: ${params.face}`);
@@ -1465,8 +1467,12 @@ function addFontData(params) {
   return { message: `Font ${face} added`, face: face, fileName: fontFileNames[face] };
 }
 
-function clearAllFontData() {
-  console.log(`Clearing all font data`);
+/**
+ * Clear all font data.
+ * @param {{docHandle: number}} params
+ */
+function clearAllFontData(params) {
+  console.log(`Clearing all font data for document: ${params.docHandle}`);
   for (const face in fontFileNames) {
     const fileName = fontFileNames[face];
     fileSystem.unregisterFile(`/usr/share/fonts/${fileName}`);
