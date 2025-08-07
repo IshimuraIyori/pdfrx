@@ -677,6 +677,12 @@ abstract class PdfPage {
     final inputFullText = await loadText();
     final inputCharRects = await loadTextCharRects();
 
+    if (inputFullText.length != inputCharRects.length) {
+      throw Exception(
+        'Page $pageNumber: Internal Error: text and character rects length mismatch (${inputFullText.length} <=> ${inputCharRects.length})',
+      );
+    }
+
     final fullText = StringBuffer();
     final charRects = <PdfRect>[];
 
