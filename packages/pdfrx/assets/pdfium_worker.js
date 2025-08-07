@@ -511,6 +511,7 @@ class FileSystemEmulator {
   getdents64(fd, dirp, count) {
     /** @type {DirectoryFileDescriptorContext} */
     const context = this.fd2context[fd];
+    console.log(`Getting directory entries for ${context.fileName} from position=${context.position}`);
     const entries = context.entries;
     context.getdents_position = context.getdents_position || 0;
     if (entries == null) return -1;
@@ -521,6 +522,7 @@ class FileSystemEmulator {
     for (; context.position < entries.length; context.position++) {
       const i = context.position;
       let d_type, d_name;
+      console.log(`  ${i}: ${entries[i]}`);
       if (entries[i].endsWith('/')) {
         d_type = DT_DIR;
         d_name = entries[i].substring(0, entries[i].length - 1);
@@ -1403,6 +1405,13 @@ function _initializeFontEnvironment() {
   const sysFontInfoBuffer = Pdfium.wasmExports.FPDF_GetDefaultSystemFontInfo();
   const sysFontInfo = new Int32Array(Pdfium.memory.buffer, sysFontInfoBuffer, 9); // struct _FPDF_SYSFONTINFO
 
+  // void EnumFonts(FPDF_SYSFONTINFO* pThis, void* pMapper)
+  const enumFonts = sysFontInfo[2];
+  sysFontInfo[2] = Pdfium.addFunction((pThis, pMapper) => {
+    console.log(`EnumFonts called.`);
+    return Pdfium.invokeFunc(enumFonts, (func) => func(sysFontInfoBuffer, pMapper));
+  }, 'vii');
+
   // void* MapFont(
   //   struct _FPDF_SYSFONTINFO* pThis,
   //   int weight,
@@ -1428,6 +1437,16 @@ function _initializeFontEnvironment() {
         charset: charset,
         pitchFamily: pitchFamily,
       };
+    } else {
+      // unsigned long GetFaceName(FPDF_SYSFONTINFO* pThis, void* hFont, char* buffer, unsigned long buf_size)
+      const faceNameBuffer = Pdfium.wasmExports.malloc(64);
+      const faceNameLength = Pdfium.invokeFunc(sysFontInfo[6], (func) => func(sysFontInfoBuffer, result, faceNameBuffer, 64));
+      const realFaceName = StringUtils.utf8BytesToString(new Uint8Array(Pdfium.memory.buffer, faceNameBuffer, faceNameLength));
+      Pdfium.wasmExports.free(faceNameBuffer);
+
+      // int GetFontCharset(FPDF_SYSFONTINFO* pThis, void* hFont)
+      const fontCharset = Pdfium.invokeFunc(sysFontInfo[7], (func) => func(sysFontInfoBuffer, result));
+      console.log(`GetFontCharset(${realFaceName}) => ${fontCharset}`);
     }
     return result;
   }, 'iiiiiiii');
@@ -1437,48 +1456,68 @@ function _initializeFontEnvironment() {
   Pdfium.wasmExports.FPDF_SetSystemFontInfo(sysFontInfoBuffer);
 }
 
-/**
- * Reload fonts in PDFium.
- * @param {{docHandle: number}} params
- * 
- * The function is based on the fact that PDFium reloads all the fonts when FPDF_SetSystemFontInfo is called.
- */
-function reloadFonts(params) {
-  console.log(`Reloading system fonts in PDFium for document: ${params.docHandle}...`);
-  _initializeFontEnvironment();
-  return { message: 'Fonts reloaded' };
-}
-/**
- * @type {{[face: string]: string}}
- */
-const fontFileNames = {};
 let fontFilesId = 0;
+/**
+ * @typedef {{[face: string]: string}} FaceNameToFiles
+ * 
+ * @type {FaceNameToFiles}
+ */
+const allFontFileNames = {};
 
 /**
- * Add font data to the file system.
- * @param {{docHandle: number, face: string, data: ArrayBuffer}} params
+ * @type {{[docHandle: number]: FaceNameToFiles}}
  */
-function addFontData(params) {
-  console.log(`Adding font data for face: ${params.face}`);
-  const { face, data } = params;
-  fontFileNames[face] ??= `font_${++fontFilesId}.ttf`;
-  fileSystem.registerFileWithData(`/usr/share/fonts/${fontFileNames[face]}`, data);
-  fileSystem.registerFile('/usr/share/fonts', { entries: Object.values(fontFileNames) });
-  return { message: `Font ${face} added`, face: face, fileName: fontFileNames[face] };
+const documentFontFileNames = {};
+
+function loadFontsForDocument(params) {
+  const { docHandle } = params;
+  console.log(`Loading fonts for document: ${docHandle}`);
+  const docFontFileNames = documentFontFileNames[docHandle] ??= {};
+  fileSystem.registerFile('/usr/share/fonts', { entries: Object.values(docFontFileNames) });
+}
+
+/**
+ * Reload fonts in PDFium.
+
+ * The function is based on the fact that PDFium reloads all the fonts when FPDF_SetSystemFontInfo is called.
+ */
+function reloadFonts() {
+  console.log(`Reloading system fonts in PDFium...`);
+  _initializeFontEnvironment();
+  return { message: 'Fonts reloaded' };
 }
 
 /**
  * Clear all font data.
+ */
+function clearAllFontData() {
+  documentFontFileNames[params.docHandle] = {};
+  console.log(`Clearing all font data...`);
+  return { message: 'All font data cleared' };
+}
+
+/**
+ * Add font data for a specific document.
+ * @param {{docHandle: number, face: string, data: ArrayBuffer}} params
+ */
+function addFontDataForDocument(params) {
+  console.log(`Adding font data for face: ${params.face}`);
+  const { face, data } = params;
+  const fileName = allFontFileNames[face] ??= `font_${++fontFilesId}.ttf`;
+  const docFontFileNames = documentFontFileNames[params.docHandle] ??= {};
+  docFontFileNames[face] = fileName;
+  fileSystem.registerFileWithData(`/usr/share/fonts/${fileName}`, data);
+  fileSystem.registerFile('/usr/share/fonts', { entries: Object.values(docFontFileNames) });
+  return { message: `Font ${face} added`, face: face, fileName: fileName };
+}
+
+/**
+ * Clear all font data for a specific document.
  * @param {{docHandle: number}} params
  */
-function clearAllFontData(params) {
+function clearAllFontDataForDocument(params) {
   console.log(`Clearing all font data for document: ${params.docHandle}`);
-  for (const face in fontFileNames) {
-    const fileName = fontFileNames[face];
-    fileSystem.unregisterFile(`/usr/share/fonts/${fileName}`);
-  }
-  fileSystem.registerFile('/usr/share/fonts', { entries: [] });
-  fontFileNames = {};
+  documentFontFileNames[params.docHandle] = {};
   return { message: 'All font data cleared' };
 }
 
@@ -1498,8 +1537,9 @@ const functions = {
   loadTextCharRects,
   loadLinks,
   reloadFonts,
-  addFontData,
   clearAllFontData,
+  addFontDataForDocument,
+  clearAllFontDataForDocument
 };
 
 /**
@@ -1521,6 +1561,10 @@ function handleRequest(data) {
   const { id, command, parameters = {} } = data;
 
   try {
+    if (parameters.docHandle) {
+      loadFontsForDocument(parameters);
+    }
+
     const result = functions[command](parameters);
     if (result instanceof Promise) {
       result

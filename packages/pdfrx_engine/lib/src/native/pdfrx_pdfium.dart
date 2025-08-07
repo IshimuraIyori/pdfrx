@@ -302,16 +302,10 @@ class PdfrxEntryFunctionsImpl implements PdfrxEntryFunctions {
   }
 
   @override
-  Future<void> reloadFonts(PdfDocument document) =>
-      throw UnimplementedError('FIXME: PdfrxEntryFunctions.reloadFonts is not implemented.');
+  Future<void> reloadFonts() async {}
 
   @override
-  Future<void> addFontData(PdfDocument document, {required String face, required Uint8List data}) =>
-      throw UnimplementedError('FIXME: PdfrxEntryFunctions.addFontData is not implemented.');
-
-  @override
-  Future<void> clearAllFontData(PdfDocument document) =>
-      throw UnimplementedError('FIXME: PdfrxEntryFunctions.clearAllFontData is not implemented.');
+  Future<void> clearAllFontData() async {}
 }
 
 extension _FpdfUtf8StringExt on String {
@@ -580,6 +574,12 @@ class _PdfDocumentPdfium extends PdfDocument {
     }
     return siblings;
   }
+
+  @override
+  Future<void> addFontData({required String face, required Uint8List data}) async {}
+
+  @override
+  Future<void> clearAllFontData() async {}
 }
 
 class _PdfPagePdfium extends PdfPage {

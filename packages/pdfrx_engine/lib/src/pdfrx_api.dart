@@ -112,11 +112,8 @@ abstract class PdfrxEntryFunctions {
     bool withCredentials = false,
   });
 
-  Future<void> reloadFonts(PdfDocument document);
-
-  Future<void> addFontData(PdfDocument document, {required String face, required Uint8List data});
-
-  Future<void> clearAllFontData(PdfDocument document);
+  Future<void> reloadFonts();
+  Future<void> clearAllFontData();
 }
 
 /// Callback function to notify download progress.
@@ -343,6 +340,10 @@ abstract class PdfDocument {
 
   /// Load outline (a.k.a. bookmark).
   Future<List<PdfOutlineNode>> loadOutline();
+
+  Future<void> addFontData({required String face, required Uint8List data});
+
+  Future<void> clearAllFontData();
 
   /// Determine whether document handles are identical or not.
   ///

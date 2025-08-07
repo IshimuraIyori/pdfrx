@@ -286,31 +286,16 @@ class PdfrxEntryFunctionsWasmImpl extends PdfrxEntryFunctions {
     }
   }
 
-  dynamic _docHandle(PdfDocument document) {
-    return (document as _PdfDocumentWasm).document['docHandle'];
+  @override
+  Future<void> reloadFonts() async {
+    await _init();
+    await _sendCommand('reloadFonts', parameters: {});
   }
 
   @override
-  Future<void> reloadFonts(PdfDocument document) async {
+  Future<void> clearAllFontData() async {
     await _init();
-    await _sendCommand('reloadFonts', parameters: {'docHandle': _docHandle(document)});
-  }
-
-  @override
-  Future<void> addFontData(PdfDocument document, {required String face, required Uint8List data}) async {
-    await _init();
-    final jsData = data.buffer.toJS;
-    await _sendCommand(
-      'addFontData',
-      parameters: {'docHandle': _docHandle(document), 'face': face, 'data': jsData},
-      transfer: [jsData].toJS,
-    );
-  }
-
-  @override
-  Future<void> clearAllFontData(PdfDocument document) async {
-    await _init();
-    await _sendCommand('clearAllFontData', parameters: {'docHandle': _docHandle(document)});
+    await _sendCommand('clearAllFontData', parameters: {});
   }
 }
 
@@ -407,6 +392,21 @@ class _PdfDocumentWasm extends PdfDocument {
 
   @override
   late final List<PdfPage> pages;
+
+  @override
+  Future<void> addFontData({required String face, required Uint8List data}) async {
+    final jsData = data.buffer.toJS;
+    await _sendCommand(
+      'addFontDataForDocument',
+      parameters: {'docHandle': document['docHandle'], 'face': face, 'data': jsData},
+      transfer: [jsData].toJS,
+    );
+  }
+
+  @override
+  Future<void> clearAllFontData() async {
+    await _sendCommand('clearAllFontDataForDocument', parameters: {'docHandle': document['docHandle']});
+  }
 
   void updateMissingFonts(Map<dynamic, dynamic>? missingFonts) {
     if (missingFonts == null || missingFonts.isEmpty) {
