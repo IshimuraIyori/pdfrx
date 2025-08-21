@@ -467,7 +467,9 @@ class _PdfDocumentPdfium extends PdfDocument {
                 ? pageCount
                 : min(pageCount, params.pagesCountLoadedSoFar + params.maxPageCountToLoadAdditionally!);
             final t = params.timeoutUs != null ? (Stopwatch()..start()) : null;
-            final pages = <({double width, double height, int rotation})>[];
+            final pages = <({double width, double height, int rotation, bool isLoaded})>[];
+            
+            // Load full page data for pages within the limit
             for (int i = params.pagesCountLoadedSoFar; i < end; i++) {
               final page = pdfium.FPDF_LoadPage(doc, i);
               try {
@@ -475,6 +477,7 @@ class _PdfDocumentPdfium extends PdfDocument {
                   width: pdfium.FPDF_GetPageWidthF(page),
                   height: pdfium.FPDF_GetPageHeightF(page),
                   rotation: pdfium.FPDFPage_GetRotation(page),
+                  isLoaded: true,
                 ));
               } finally {
                 pdfium.FPDF_ClosePage(page);
@@ -483,6 +486,25 @@ class _PdfDocumentPdfium extends PdfDocument {
                 break;
               }
             }
+            
+            // For progressive loading, also get dimensions for remaining pages
+            if (params.maxPageCountToLoadAdditionally != null && pages.length < pageCount - params.pagesCountLoadedSoFar) {
+              // Load only dimensions for remaining pages
+              for (int i = params.pagesCountLoadedSoFar + pages.length; i < pageCount; i++) {
+                final page = pdfium.FPDF_LoadPage(doc, i);
+                try {
+                  pages.add((
+                    width: pdfium.FPDF_GetPageWidthF(page),
+                    height: pdfium.FPDF_GetPageHeightF(page),
+                    rotation: pdfium.FPDFPage_GetRotation(page),
+                    isLoaded: false,
+                  ));
+                } finally {
+                  pdfium.FPDF_ClosePage(page);
+                }
+              }
+            }
+            
             return (pages: pages, totalPageCount: pageCount);
           });
         },
@@ -504,26 +526,13 @@ class _PdfDocumentPdfium extends PdfDocument {
             width: pageData.width,
             height: pageData.height,
             rotation: PdfPageRotation.values[pageData.rotation],
-            isLoaded: true,
+            isLoaded: pageData.isLoaded,
           ),
         );
       }
-      final pageCountLoadedTotal = pages.length;
-      if (pageCountLoadedTotal > 0) {
-        final last = pages.last;
-        for (int i = pages.length; i < results.totalPageCount; i++) {
-          pages.add(
-            _PdfPagePdfium._(
-              document: this,
-              pageNumber: pages.length + 1,
-              width: last.width,
-              height: last.height,
-              rotation: last.rotation,
-              isLoaded: false,
-            ),
-          );
-        }
-      }
+      final pageCountLoadedTotal = pages.where((p) => p.isLoaded).length;
+      
+      // No need to add placeholder pages anymore as we have actual dimensions
       return (pages: pages, pageCountLoadedTotal: pageCountLoadedTotal);
     } catch (e) {
       rethrow;

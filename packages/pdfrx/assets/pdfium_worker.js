@@ -874,18 +874,7 @@ function _loadDocument(docHandle, useProgressiveLoading, onDispose) {
     formHandle = Pdfium.wasmExports.FPDFDOC_InitFormFillEnvironment(docHandle, formInfo);
 
     const pages = _loadPagesInLimitedTime(docHandle, 0, useProgressiveLoading ? 1 : null);
-    if (useProgressiveLoading) {
-      const firstPage = pages[0];
-      for (let i = 1; i < pageCount; i++) {
-        pages.push({
-          pageIndex: i,
-          width: firstPage.width,
-          height: firstPage.height,
-          rotation: firstPage.rotation,
-          isLoaded: false,
-        });
-      }
-    }
+    // No need to add placeholder pages anymore as dimensions are loaded in _loadPagesInLimitedTime
     disposers[docHandle] = onDispose;
     _updateMissingFonts(docHandle);
 
@@ -916,7 +905,7 @@ function _loadDocument(docHandle, useProgressiveLoading, onDispose) {
  * @param {number} timeoutMs
  * @returns {PdfPage[]}
  */
-function _loadPagesInLimitedTime(docHandle, pagesLoadedCountSoFar, maxPageCountToLoadAdditionally, timeoutMs) {
+function _loadPagesInLimitedTime(docHandle, pagesLoadedCountSoFar, maxPageCountToLoadAdditionally, timeoutMs, loadDimensionsOnly = false) {
   const pageCount = Pdfium.wasmExports.FPDF_GetPageCount(docHandle);
   const end =
     maxPageCountToLoadAdditionally == null
@@ -926,6 +915,8 @@ function _loadPagesInLimitedTime(docHandle, pagesLoadedCountSoFar, maxPageCountT
   /** @type {PdfPage[]} */
   const pages = [];
   _resetMissingFonts();
+  
+  // Load full page data for pages within the limit
   for (let i = pagesLoadedCountSoFar; i < end; i++) {
     const pageHandle = Pdfium.wasmExports.FPDF_LoadPage(docHandle, i);
     if (!pageHandle) {
@@ -938,13 +929,35 @@ function _loadPagesInLimitedTime(docHandle, pagesLoadedCountSoFar, maxPageCountT
       width: Pdfium.wasmExports.FPDF_GetPageWidth(pageHandle),
       height: Pdfium.wasmExports.FPDF_GetPageHeight(pageHandle),
       rotation: Pdfium.wasmExports.FPDFPage_GetRotation(pageHandle),
-      isLoaded: true,
+      isLoaded: !loadDimensionsOnly,
     });
     Pdfium.wasmExports.FPDF_ClosePage(pageHandle);
     if (t != null && Date.now() > t) {
       break;
     }
   }
+  
+  // For progressive loading, also get dimensions for remaining pages
+  if (maxPageCountToLoadAdditionally != null && pages.length < pageCount - pagesLoadedCountSoFar) {
+    // Load only dimensions for remaining pages
+    for (let i = pagesLoadedCountSoFar + pages.length; i < pageCount; i++) {
+      const pageHandle = Pdfium.wasmExports.FPDF_LoadPage(docHandle, i);
+      if (!pageHandle) {
+        const error = Pdfium.wasmExports.FPDF_GetLastError();
+        throw new Error(`FPDF_LoadPage failed (${_getErrorMessage(error)})`);
+      }
+
+      pages.push({
+        pageIndex: i,
+        width: Pdfium.wasmExports.FPDF_GetPageWidth(pageHandle),
+        height: Pdfium.wasmExports.FPDF_GetPageHeight(pageHandle),
+        rotation: Pdfium.wasmExports.FPDFPage_GetRotation(pageHandle),
+        isLoaded: false,
+      });
+      Pdfium.wasmExports.FPDF_ClosePage(pageHandle);
+    }
+  }
+  
   _updateMissingFonts(docHandle);
   return pages;
 }
