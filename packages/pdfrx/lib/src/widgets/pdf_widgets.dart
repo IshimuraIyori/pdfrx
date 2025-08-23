@@ -41,7 +41,6 @@ class PdfDocumentViewBuilder extends StatefulWidget {
   const PdfDocumentViewBuilder({
     required this.documentRef,
     required this.builder,
-    this.targetPageNumber,
     super.key,
   });
 
@@ -53,7 +52,6 @@ class PdfDocumentViewBuilder extends StatefulWidget {
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
     bool autoDispose = true,
-    this.targetPageNumber,
   }) : documentRef = PdfDocumentRefAsset(
          assetName,
          passwordProvider: passwordProvider,
@@ -70,7 +68,6 @@ class PdfDocumentViewBuilder extends StatefulWidget {
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
     bool autoDispose = true,
-    this.targetPageNumber,
   }) : documentRef = PdfDocumentRefFile(
          filePath,
          passwordProvider: passwordProvider,
@@ -90,7 +87,6 @@ class PdfDocumentViewBuilder extends StatefulWidget {
     bool preferRangeAccess = false,
     Map<String, String>? headers,
     bool withCredentials = false,
-    this.targetPageNumber,
   }) : documentRef = PdfDocumentRefUri(
          uri,
          passwordProvider: passwordProvider,
@@ -108,11 +104,6 @@ class PdfDocumentViewBuilder extends StatefulWidget {
   /// A builder that builds a widget tree with the PDF document.
   final PdfDocumentViewBuilderFunction builder;
 
-  /// Target page number to load (1-based).
-  ///
-  /// When specified with useProgressiveLoading, only this page will be loaded
-  /// from the PDF document.
-  final int? targetPageNumber;
 
   @override
   State<PdfDocumentViewBuilder> createState() => _PdfDocumentViewBuilderState();
@@ -164,20 +155,7 @@ class _PdfDocumentViewBuilderState extends State<PdfDocumentViewBuilder> {
           setState(() {});
         }
       });
-      
-      // If targetPageNumber is specified, load only that page
-      // Otherwise, load all pages progressively
-      if (widget.targetPageNumber != null && document != null) {
-        // Load specific page if it exists
-        if (widget.targetPageNumber! <= document.pages.length && widget.targetPageNumber! > 0) {
-          final targetPage = document.pages[widget.targetPageNumber! - 1];
-          if (!targetPage.isLoaded) {
-            document.loadPagesProgressively();
-          }
-        }
-      } else {
-        document?.loadPagesProgressively();
-      }
+      document?.loadPagesProgressively();
       setState(() {});
     }
   }
@@ -261,16 +239,9 @@ class PdfPageView extends StatefulWidget {
   final PdfPageViewDecorationBuilder? decorationBuilder;
 
   /// Whether to use progressive loading for the page.
-  ///
-  /// When true, the page will render progressively using the page's actual
-  /// aspect ratio from the start.
   final bool useProgressiveLoading;
 
   /// Whether to load only the target page.
-  ///
-  /// When true with useProgressiveLoading, only the specified page will be loaded
-  /// from the PDF document, which is more efficient for large PDFs when you only
-  /// need to display a single page.
   final bool loadOnlyTargetPage;
 
   @override
@@ -286,22 +257,6 @@ class _PdfPageViewState extends State<PdfPageView> {
   void initState() {
     super.initState();
     pdfrxFlutterInitialize();
-    
-    // If loadOnlyTargetPage is enabled, ensure the target page is loaded
-    if (widget.loadOnlyTargetPage && widget.document != null) {
-      _ensureTargetPageLoaded();
-    }
-  }
-  
-  void _ensureTargetPageLoaded() {
-    final document = widget.document;
-    if (document != null && widget.pageNumber > 0 && widget.pageNumber <= document.pages.length) {
-      final targetPage = document.pages[widget.pageNumber - 1];
-      if (!targetPage.isLoaded) {
-        // Load pages progressively starting from the target page
-        document.loadPagesProgressively();
-      }
-    }
   }
 
   @override
@@ -413,7 +368,6 @@ class _PdfPageViewState extends State<PdfPageView> {
     }
     final page = document.pages[widget.pageNumber - 1];
 
-    // Calculate page size based on the page's actual aspect ratio
     final Size pageSize;
     if (widget.pageSizeCallback != null) {
       pageSize = widget.pageSizeCallback!(size, page);
@@ -422,7 +376,6 @@ class _PdfPageViewState extends State<PdfPageView> {
       pageSize = Size(page.width * scale, page.height * scale);
     }
 
-    // Always set the page size immediately to ensure correct aspect ratio
     if (_pageSize == null) {
       _pageSize = pageSize;
       if (mounted) {
@@ -433,62 +386,52 @@ class _PdfPageViewState extends State<PdfPageView> {
     if (pageSize == _pageSize) return;
     _pageSize = pageSize;
 
-    // Cancel previous loading
     _cancellationToken?.cancel();
     _cancellationToken = page.createCancellationToken();
 
-    // Render the page with progressive approach (multiple quality levels)
-    _renderPageProgressive(page, pageSize);
+    // Progressive rendering: low quality first, then full quality
+    _renderProgressive(page, pageSize);
   }
 
-  Future<void> _renderPageProgressive(PdfPage page, Size pageSize) async {
-    // First render a low quality preview quickly
-    final lowQualityScale = 0.25;
-    final lowQualitySize = Size(
-      pageSize.width * lowQualityScale,
-      pageSize.height * lowQualityScale,
-    );
-    
+  Future<void> _renderProgressive(PdfPage page, Size pageSize) async {
+    // Render low quality (25%)
     try {
-      final lowQualityImage = await page.render(
-        fullWidth: lowQualitySize.width,
-        fullHeight: lowQualitySize.height,
+      final lowSize = Size(pageSize.width * 0.25, pageSize.height * 0.25);
+      final lowImage = await page.render(
+        fullWidth: lowSize.width,
+        fullHeight: lowSize.height,
         cancellationToken: _cancellationToken,
       );
       
-      if (lowQualityImage != null && !_cancellationToken!.isCanceled) {
-        final image = await lowQualityImage.createImage();
-        lowQualityImage.dispose();
+      if (lowImage != null && !_cancellationToken!.isCanceled) {
+        final img = await lowImage.createImage();
+        lowImage.dispose();
         _image?.dispose();
-        _image = image;
-        if (mounted) {
-          setState(() {});
-        }
+        _image = img;
+        if (mounted) setState(() {});
       }
     } catch (e) {
-      developer.log('Error rendering low quality image: $e');
+      developer.log('Low quality render error: $e');
     }
 
-    // Then render full quality
+    // Render full quality
     if (!_cancellationToken!.isCanceled) {
       try {
-        final fullQualityImage = await page.render(
+        final fullImage = await page.render(
           fullWidth: pageSize.width,
           fullHeight: pageSize.height,
           cancellationToken: _cancellationToken,
         );
         
-        if (fullQualityImage != null && !_cancellationToken!.isCanceled) {
-          final image = await fullQualityImage.createImage();
-          fullQualityImage.dispose();
+        if (fullImage != null && !_cancellationToken!.isCanceled) {
+          final img = await fullImage.createImage();
+          fullImage.dispose();
           _image?.dispose();
-          _image = image;
-          if (mounted) {
-            setState(() {});
-          }
+          _image = img;
+          if (mounted) setState(() {});
         }
       } catch (e) {
-        developer.log('Error rendering full quality image: $e');
+        developer.log('Full quality render error: $e');
       }
     }
   }
