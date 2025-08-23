@@ -1,80 +1,131 @@
-# pdfrx
+# PDFrx Progressive Loading Fork
 
-This repository contains two Dart/Flutter packages for PDF rendering and viewing:
+正しいアスペクト比で即座にPDFを表示できるpdfrxの改良版です。
 
-## Packages
+## ✨ 新機能
 
-### [pdfrx_engine](packages/pdfrx_engine/)
+- **Progressive Loading**: 低品質プレビュー → 高品質レンダリング
+- **正確なアスペクト比**: ページ情報を事前取得して正しい比率で表示
+- **メモリ最適化**: 必要なページのみロード可能
 
-A platform-agnostic PDF rendering API built on top of PDFium.
+## 📦 インストール
 
-- Pure Dart package (no Flutter dependencies)
-- Provides low-level PDF document API
-- Can be used in CLI applications or non-Flutter Dart projects
-- Supports all platforms: Android, iOS, Windows, macOS, Linux
-
-### [pdfrx](packages/pdfrx/)
-
-A cross-platform PDF viewer plugin for Flutter.
-
-- Flutter plugin with UI widgets
-- Built on top of pdfrx_engine
-- Provides high-level viewer widgets and overlays
-- Includes text selection, search, zoom controls, and more
-
-## When to Use Which Package
-
-- **Use `pdfrx`** if you're building a Flutter application and need PDF viewing capabilities with UI
-- **Use `pdfrx_engine`** if you need PDF rendering without Flutter dependencies (e.g., server-side PDF processing, CLI tools)
-
-## Getting Started
-
-### For Flutter Applications
-
-Add `pdfrx` to your `pubspec.yaml`:
+### 方法1: GitHubから直接使用
 
 ```yaml
 dependencies:
-  pdfrx: ^2.1.3
+  pdfrx:
+    git:
+      url: https://github.com/IshimuraIyori/pdfrx.git
+      ref: progressive-loading
+      path: packages/pdfrx
 ```
 
-### For Pure Dart Applications
-
-Add `pdfrx_engine` to your `pubspec.yaml`:
+### 方法2: ローカルパスから使用
 
 ```yaml
 dependencies:
-  pdfrx_engine: ^0.1.12
+  pdfrx:
+    path: /path/to/pdfrx/packages/pdfrx
 ```
 
-## Development
+## 🚀 使い方
 
-This is a monorepo managed with [Melos](https://melos.invertase.dev/). To work with the packages:
+```dart
+import 'package:pdfrx/pdfrx.dart';
+
+// 基本的な使用（公式版と同じ）
+PdfViewer.uri(
+  Uri.parse('https://example.com/document.pdf'),
+)
+
+// Progressive Loading を有効化
+PdfPageView(
+  document: document,
+  pageNumber: 1,
+  useProgressiveLoading: true,  // NEW!
+  loadOnlyTargetPage: true,     // NEW! (optional)
+)
+```
+
+## 📝 新しいパラメータ
+
+| パラメータ | 型 | デフォルト | 説明 |
+|-----------|-----|----------|------|
+| `useProgressiveLoading` | `bool` | `false` | プログレッシブレンダリングを有効化 |
+| `loadOnlyTargetPage` | `bool` | `false` | 表示ページのみロード（メモリ効率） |
+
+## 🎯 動作の仕組み
+
+`useProgressiveLoading: true` の場合：
+
+1. **ページ情報の事前取得**: `loadPagesProgressively()` でページのwidth/heightを取得
+2. **ローディング表示**: ページ情報取得中は `CircularProgressIndicator` を表示
+3. **正しいアスペクト比で領域確保**: ページサイズが確定後、正確な比率で表示領域を確保
+4. **段階的レンダリング**: 25%品質 → 100%品質の2段階でレンダリング
+
+## 💡 使用例
+
+### シンプルな例
+
+```dart
+PdfDocumentViewBuilder.uri(
+  Uri.parse('https://example.com/document.pdf'),
+  builder: (context, document) {
+    if (document == null) {
+      return Center(child: CircularProgressIndicator());
+    }
+    
+    return PdfPageView(
+      document: document,
+      pageNumber: 1,
+      useProgressiveLoading: true,
+    );
+  },
+)
+```
+
+### ページビューアー
+
+```dart
+PageView.builder(
+  itemCount: document.pages.length,
+  itemBuilder: (context, index) {
+    return PdfPageView(
+      document: document,
+      pageNumber: index + 1,
+      useProgressiveLoading: true,
+      loadOnlyTargetPage: true,  // メモリ効率化
+    );
+  },
+)
+```
+
+## 🔧 トラブルシューティング
+
+エラーが発生する場合：
 
 ```bash
-# Install melos globally
-dart pub global activate melos
-
-# Bootstrap the project
-melos bootstrap
-
-# Run analysis on all packages
-melos analyze
+flutter clean
+flutter pub cache clean
+flutter pub get
 ```
 
-## Example Application
+## ⚙️ 技術詳細
 
-The example viewer application is located in `packages/pdfrx/example/viewer/`. It demonstrates the full capabilities of the pdfrx Flutter plugin.
+変更箇所：
+- `packages/pdfrx/lib/src/widgets/pdf_widgets.dart` のみ
+- 追加メソッド: `_ensurePageLoaded()`, `_updateImageProgressive()`, `_renderProgressive()`
+- 公式版との100%後方互換性を維持
 
-```bash
-cd packages/pdfrx/example/viewer
-flutter run
-```
+## 📄 ライセンス
 
-## Contributing
+オリジナルのpdfrxと同じライセンスです。
 
-Contributions are welcome! Please read the individual package READMEs for specific development guidelines.
+## 🙏 クレジット
 
-## License
+Original pdfrx: https://github.com/espresso3389/pdfrx
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+---
+
+**注意**: これは非公式のフォークです。公式版は [https://github.com/espresso3389/pdfrx](https://github.com/espresso3389/pdfrx) をご覧ください。
