@@ -70,6 +70,8 @@ class PdfViewerParams {
     this.keyHandlerParams = const PdfViewerKeyHandlerParams(),
     this.behaviorControlParams = const PdfViewerBehaviorControlParams(),
     this.forceReload = false,
+    this.enableSinglePageMode = false,
+    this.singlePageNumber,
   });
 
   /// Margin around the page.
@@ -534,6 +536,21 @@ class PdfViewerParams {
   /// sometimes it is useful to force reload the viewer by setting this to true.
   final bool forceReload;
 
+  /// Enable single page mode where only one page is displayed at a time.
+  ///
+  /// When enabled, the viewer will only load and display a single page at a time,
+  /// using the correct aspect ratio for each page instead of assuming all pages
+  /// have the same aspect ratio as the first page.
+  ///
+  /// This mode is useful for documents with mixed page sizes or orientations.
+  final bool enableSinglePageMode;
+
+  /// The specific page number to display in single page mode.
+  ///
+  /// If null, the viewer will use the initial page number or page navigation
+  /// to determine which page to display.
+  final int? singlePageNumber;
+
   /// Determine whether the viewer needs to be reloaded or not.
   ///
   bool doChangesRequireReload(PdfViewerParams? other) {
@@ -565,7 +582,9 @@ class PdfViewerParams {
         other.scrollByArrowKey != scrollByArrowKey ||
         other.horizontalCacheExtent != horizontalCacheExtent ||
         other.verticalCacheExtent != verticalCacheExtent ||
-        other.linkHandlerParams != linkHandlerParams;
+        other.linkHandlerParams != linkHandlerParams ||
+        other.enableSinglePageMode != enableSinglePageMode ||
+        other.singlePageNumber != singlePageNumber;
   }
 
   @override
@@ -625,7 +644,9 @@ class PdfViewerParams {
         other.onKey == onKey &&
         other.keyHandlerParams == keyHandlerParams &&
         other.behaviorControlParams == behaviorControlParams &&
-        other.forceReload == forceReload;
+        other.forceReload == forceReload &&
+        other.enableSinglePageMode == enableSinglePageMode &&
+        other.singlePageNumber == singlePageNumber;
   }
 
   @override
@@ -683,7 +704,9 @@ class PdfViewerParams {
         onKey.hashCode ^
         keyHandlerParams.hashCode ^
         behaviorControlParams.hashCode ^
-        forceReload.hashCode;
+        forceReload.hashCode ^
+        enableSinglePageMode.hashCode ^
+        singlePageNumber.hashCode;
   }
 }
 

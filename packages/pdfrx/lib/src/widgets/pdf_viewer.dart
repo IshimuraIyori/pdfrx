@@ -894,6 +894,10 @@ class _PdfViewerState extends State<PdfViewer>
 
   Rect _getCacheExtentRect() {
     final visibleRect = _visibleRect;
+    // In single page mode, don't prefetch adjacent pages
+    if (widget.params.enableSinglePageMode) {
+      return visibleRect;
+    }
     return visibleRect.inflateHV(
       horizontal: visibleRect.width * widget.params.horizontalCacheExtent,
       vertical: visibleRect.height * widget.params.verticalCacheExtent,
@@ -1109,6 +1113,30 @@ class _PdfViewerState extends State<PdfViewer>
   }
 
   PdfPageLayout _layoutPages(List<PdfPage> pages, PdfViewerParams params) {
+    if (params.enableSinglePageMode) {
+      // In single page mode, only layout the current page
+      final pageNumber = params.singlePageNumber ?? _pageNumber ?? 1;
+      final pageIndex = (pageNumber - 1).clamp(0, pages.length - 1);
+      
+      final pageLayout = <Rect>[];
+      Size documentSize = Size.zero;
+      
+      for (int i = 0; i < pages.length; i++) {
+        if (i == pageIndex) {
+          // Only the current page is visible
+          final page = pages[i];
+          documentSize = Size(page.width + params.margin * 2, page.height + params.margin * 2);
+          pageLayout.add(Rect.fromLTWH(params.margin, params.margin, page.width, page.height));
+        } else {
+          // Other pages are not visible (zero size)
+          pageLayout.add(Rect.zero);
+        }
+      }
+      
+      return PdfPageLayout(pageLayouts: pageLayout, documentSize: documentSize);
+    }
+    
+    // Default multi-page layout
     final width = pages.fold(0.0, (w, p) => max(w, p.width)) + params.margin * 2;
 
     final pageLayout = <Rect>[];
@@ -1517,6 +1545,14 @@ class _PdfViewerState extends State<PdfViewer>
       targetPageNumber = pageNumber;
     }
     _gotoTargetPageNumber = pageNumber;
+
+    // In single page mode, relayout when switching pages
+    if (widget.params.enableSinglePageMode && _pageNumber != targetPageNumber) {
+      _setCurrentPageNumber(targetPageNumber);
+      _relayoutPages();
+      _calcCoverFitScale();
+      _calcZoomStopTable();
+    }
 
     await _goTo(_calcMatrixForPage(pageNumber: targetPageNumber, anchor: anchor), duration: duration);
     _setCurrentPageNumber(targetPageNumber);
