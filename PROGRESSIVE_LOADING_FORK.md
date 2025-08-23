@@ -23,7 +23,7 @@ Add this to your `pubspec.yaml`:
 dependencies:
   pdfrx:
     git:
-      url: https://github.com/YOUR_USERNAME/pdfrx.git
+      url: https://github.com/IshimuraIyori/pdfrx.git
       path: packages/pdfrx
       ref: progressive-loading  # or use specific commit hash
 ```
@@ -100,7 +100,7 @@ class MyPdfViewer extends StatelessWidget {
 ```yaml
 pdfrx:
   git:
-    url: https://github.com/YOUR_USERNAME/pdfrx.git
+    url: https://github.com/IshimuraIyori/pdfrx.git
     path: packages/pdfrx
 ```
 
@@ -113,7 +113,7 @@ pdfrx: ^2.1.3
 
 ### Clone and use locally:
 ```bash
-git clone https://github.com/YOUR_USERNAME/pdfrx.git
+git clone https://github.com/IshimuraIyori/pdfrx.git
 cd your_flutter_app
 ```
 
