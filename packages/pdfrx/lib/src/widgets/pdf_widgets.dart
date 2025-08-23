@@ -252,13 +252,74 @@ class _PdfPageViewState extends State<PdfPageView> {
   ui.Image? _image;
   Size? _pageSize;
   PdfPageRenderCancellationToken? _cancellationToken;
+  bool _isPageLoaded = false;
 
   @override
   void initState() {
     super.initState();
     pdfrxFlutterInitialize();
+    
+    // useProgressiveLoadingが有効な場合、ページ情報を事前に取得
+    if (widget.useProgressiveLoading) {
+      _ensurePageLoaded();
+    }
+  }
+  
+  Future<void> _ensurePageLoaded() async {
+    final document = widget.document;
+    if (document == null || widget.pageNumber < 1 || widget.pageNumber > document.pages.length) {
+      return;
+    }
+    
+    final page = document.pages[widget.pageNumber - 1];
+    
+    // ページがまだロードされていない場合は、ロードを待つ
+    if (!page.isLoaded) {
+      if (widget.loadOnlyTargetPage) {
+        // 特定ページのみをロード（効率的）
+        // loadPagesProgressivelyはコールバックで特定ページのみ処理可能
+        await document.loadPagesProgressively(
+          onPageLoadProgress: (currentPageNumber, totalPageCount, data) {
+            // 目的のページに到達したら処理を停止
+            if (currentPageNumber >= widget.pageNumber) {
+              return false; // ロードを停止
+            }
+            return true; // 継続
+          },
+        );
+      } else {
+        // 全ページをプログレッシブにロード
+        await document.loadPagesProgressively();
+      }
+    }
+    
+    // ページのアスペクト比が確定したことを確認
+    if (mounted && page.isLoaded) {
+      setState(() {
+        _isPageLoaded = true;
+      });
+    }
   }
 
+  @override
+  void didUpdateWidget(PdfPageView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    
+    // ページ番号が変更された場合、リセット
+    if (oldWidget.pageNumber != widget.pageNumber || 
+        oldWidget.document != widget.document) {
+      _isPageLoaded = false;
+      _pageSize = null;
+      _image?.dispose();
+      _image = null;
+      _cancellationToken?.cancel();
+      
+      if (widget.useProgressiveLoading) {
+        _ensurePageLoaded();
+      }
+    }
+  }
+  
   @override
   void dispose() {
     _image?.dispose();
@@ -290,6 +351,21 @@ class _PdfPageViewState extends State<PdfPageView> {
 
   @override
   Widget build(BuildContext context) {
+    // useProgressiveLoadingが有効でページがまだロードされていない場合
+    if (widget.useProgressiveLoading && !_isPageLoaded) {
+      // ローディングインジケーターを表示
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Loading page ${widget.pageNumber}...'),
+          ],
+        ),
+      );
+    }
+    
     return LayoutBuilder(
       builder: (context, constraints) {
         final query = MediaQuery.of(context);
@@ -367,15 +443,25 @@ class _PdfPageViewState extends State<PdfPageView> {
       return;
     }
     final page = document.pages[widget.pageNumber - 1];
+    
+    // ページがロードされていることを確認
+    if (!page.isLoaded) {
+      // ページ情報が利用できない場合は待機
+      await _ensurePageLoaded();
+      return;
+    }
 
+    // ページの実際のアスペクト比を使用してサイズを計算
     final Size pageSize;
     if (widget.pageSizeCallback != null) {
       pageSize = widget.pageSizeCallback!(size, page);
     } else {
+      // page.widthとpage.heightは実際のPDFページのサイズ（ポイント単位）
       final scale = min(widget.maximumDpi / 72, min(size.width / page.width, size.height / page.height));
       pageSize = Size(page.width * scale, page.height * scale);
     }
 
+    // 初回のみページサイズを設定（正しいアスペクト比で領域確保）
     if (_pageSize == null) {
       _pageSize = pageSize;
       if (mounted) {
