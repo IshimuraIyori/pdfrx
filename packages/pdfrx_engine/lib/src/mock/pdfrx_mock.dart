@@ -22,6 +22,7 @@ class PdfDocumentFactoryImpl implements PdfDocumentFactory {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
   }) => unimplemented();
 
   @override
@@ -32,6 +33,7 @@ class PdfDocumentFactoryImpl implements PdfDocumentFactory {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
     int? maxSizeToCacheOnMemory,
     void Function()? onDispose,
   }) => unimplemented();
@@ -44,6 +46,7 @@ class PdfDocumentFactoryImpl implements PdfDocumentFactory {
     String? sourceName,
     bool allowDataOwnershipTransfer = false,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
     void Function()? onDispose,
   }) => unimplemented();
 
@@ -53,6 +56,7 @@ class PdfDocumentFactoryImpl implements PdfDocumentFactory {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
   }) => unimplemented();
 
   @override
@@ -61,6 +65,7 @@ class PdfDocumentFactoryImpl implements PdfDocumentFactory {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
     PdfDownloadProgressCallback? progressCallback,
     bool preferRangeAccess = false,
     Map<String, String>? headers,

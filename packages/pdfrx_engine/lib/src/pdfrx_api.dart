@@ -70,6 +70,7 @@ abstract class PdfDocumentFactory {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
   });
 
   Future<PdfDocument> openData(
@@ -79,6 +80,7 @@ abstract class PdfDocumentFactory {
     String? sourceName,
     bool allowDataOwnershipTransfer = false, // only for Web
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
     void Function()? onDispose,
   });
 
@@ -87,6 +89,7 @@ abstract class PdfDocumentFactory {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
   });
 
   Future<PdfDocument> openCustom({
@@ -96,6 +99,7 @@ abstract class PdfDocumentFactory {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
     int? maxSizeToCacheOnMemory,
     void Function()? onDispose,
   });
@@ -105,6 +109,7 @@ abstract class PdfDocumentFactory {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
     PdfDownloadProgressCallback? progressCallback,
     bool preferRangeAccess = false,
     Map<String, String>? headers,
@@ -169,16 +174,21 @@ abstract class PdfDocument {
   ///
   /// If [useProgressiveLoading] is true, only the first page is loaded initially and the rest of the pages
   /// are loaded progressively when [PdfDocument.loadPagesProgressively] is called explicitly.
+  /// 
+  /// If [progressiveLoadingTargetPage] is specified, the progressive loading will load only that specific
+  /// page with its correct aspect ratio, instead of assuming all pages have the same aspect ratio as the first page.
   static Future<PdfDocument> openFile(
     String filePath, {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
   }) => PdfDocumentFactory.instance.openFile(
     filePath,
     passwordProvider: passwordProvider,
     firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
     useProgressiveLoading: useProgressiveLoading,
+    progressiveLoadingTargetPage: progressiveLoadingTargetPage,
   );
 
   /// Opening the specified asset.
@@ -190,16 +200,21 @@ abstract class PdfDocument {
   ///
   /// If [useProgressiveLoading] is true, only the first page is loaded initially and the rest of the pages
   /// are loaded progressively when [PdfDocument.loadPagesProgressively] is called explicitly.
+  /// 
+  /// If [progressiveLoadingTargetPage] is specified, the progressive loading will load only that specific
+  /// page with its correct aspect ratio, instead of assuming all pages have the same aspect ratio as the first page.
   static Future<PdfDocument> openAsset(
     String name, {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
   }) => PdfDocumentFactory.instance.openAsset(
     name,
     passwordProvider: passwordProvider,
     firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
     useProgressiveLoading: useProgressiveLoading,
+    progressiveLoadingTargetPage: progressiveLoadingTargetPage,
   );
 
   /// Opening the PDF on memory.
@@ -222,6 +237,7 @@ abstract class PdfDocument {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
     String? sourceName,
     bool allowDataOwnershipTransfer = false,
     void Function()? onDispose,
@@ -230,6 +246,7 @@ abstract class PdfDocument {
     passwordProvider: passwordProvider,
     firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
     useProgressiveLoading: useProgressiveLoading,
+    progressiveLoadingTargetPage: progressiveLoadingTargetPage,
     sourceName: sourceName,
     allowDataOwnershipTransfer: allowDataOwnershipTransfer,
     onDispose: onDispose,
@@ -261,6 +278,7 @@ abstract class PdfDocument {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
     int? maxSizeToCacheOnMemory,
     void Function()? onDispose,
   }) => PdfDocumentFactory.instance.openCustom(
@@ -270,6 +288,7 @@ abstract class PdfDocument {
     passwordProvider: passwordProvider,
     firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
     useProgressiveLoading: useProgressiveLoading,
+    progressiveLoadingTargetPage: progressiveLoadingTargetPage,
     maxSizeToCacheOnMemory: maxSizeToCacheOnMemory,
     onDispose: onDispose,
   );
@@ -301,6 +320,7 @@ abstract class PdfDocument {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
     PdfDownloadProgressCallback? progressCallback,
     bool preferRangeAccess = false,
     Map<String, String>? headers,
@@ -310,6 +330,7 @@ abstract class PdfDocument {
     passwordProvider: passwordProvider,
     firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
     useProgressiveLoading: useProgressiveLoading,
+    progressiveLoadingTargetPage: progressiveLoadingTargetPage,
     progressCallback: progressCallback,
     preferRangeAccess: preferRangeAccess,
     headers: headers,

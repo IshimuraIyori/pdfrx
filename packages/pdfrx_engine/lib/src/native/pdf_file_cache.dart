@@ -283,6 +283,7 @@ Future<PdfDocument> pdfDocumentFromUri(
   PdfPasswordProvider? passwordProvider,
   bool firstAttemptByEmptyPassword = true,
   bool useProgressiveLoading = false,
+  int? progressiveLoadingTargetPage,
   int? blockSize,
   PdfFileCache? cache,
   PdfDownloadProgressCallback? progressCallback,
@@ -310,6 +311,8 @@ Future<PdfDocument> pdfDocumentFromUri(
           cache.filePath,
           passwordProvider: passwordProvider,
           firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
+          useProgressiveLoading: useProgressiveLoading,
+          progressiveLoadingTargetPage: progressiveLoadingTargetPage,
         );
       }
     } else {
@@ -337,6 +340,7 @@ Future<PdfDocument> pdfDocumentFromUri(
             passwordProvider: passwordProvider,
             firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
             useProgressiveLoading: useProgressiveLoading,
+            progressiveLoadingTargetPage: progressiveLoadingTargetPage,
           );
         }
       }
@@ -365,6 +369,7 @@ Future<PdfDocument> pdfDocumentFromUri(
       passwordProvider: passwordProvider,
       firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
       useProgressiveLoading: useProgressiveLoading,
+      progressiveLoadingTargetPage: progressiveLoadingTargetPage,
       fileSize: cache.fileSize,
       sourceName: uri.toString(),
       onDispose: () {

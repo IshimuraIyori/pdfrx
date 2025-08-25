@@ -53,11 +53,13 @@ class PdfViewer extends StatefulWidget {
   /// [controller] is the controller to control the viewer.
   /// [params] is the parameters to customize the viewer.
   /// [initialPageNumber] is the page number to show initially.
+  /// [progressiveLoadingTargetPage] specifies the target page for progressive loading to get correct aspect ratio.
   PdfViewer.asset(
     String assetName, {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = true,
+    int? progressiveLoadingTargetPage,
     super.key,
     this.controller,
     this.params = const PdfViewerParams(),
@@ -67,6 +69,7 @@ class PdfViewer extends StatefulWidget {
          passwordProvider: passwordProvider,
          firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
          useProgressiveLoading: useProgressiveLoading,
+         progressiveLoadingTargetPage: progressiveLoadingTargetPage ?? (useProgressiveLoading ? initialPageNumber : null),
        );
 
   /// Create [PdfViewer] from a file.
@@ -78,11 +81,13 @@ class PdfViewer extends StatefulWidget {
   /// [controller] is the controller to control the viewer.
   /// [params] is the parameters to customize the viewer.
   /// [initialPageNumber] is the page number to show initially.
+  /// [progressiveLoadingTargetPage] specifies the target page for progressive loading to get correct aspect ratio.
   PdfViewer.file(
     String path, {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = true,
+    int? progressiveLoadingTargetPage,
     super.key,
     this.controller,
     this.params = const PdfViewerParams(),
@@ -92,6 +97,7 @@ class PdfViewer extends StatefulWidget {
          passwordProvider: passwordProvider,
          firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
          useProgressiveLoading: useProgressiveLoading,
+         progressiveLoadingTargetPage: progressiveLoadingTargetPage ?? (useProgressiveLoading ? initialPageNumber : null),
        );
 
   /// Create [PdfViewer] from a URI.
@@ -103,6 +109,7 @@ class PdfViewer extends StatefulWidget {
   /// [controller] is the controller to control the viewer.
   /// [params] is the parameters to customize the viewer.
   /// [initialPageNumber] is the page number to show initially.
+  /// [progressiveLoadingTargetPage] specifies the target page for progressive loading to get correct aspect ratio.
   /// [preferRangeAccess] to prefer range access to download the PDF. The default is false. (Not supported on Web).
   /// [headers] is used to specify additional HTTP headers especially for authentication/authorization.
   /// [withCredentials] is used to specify whether to include credentials in the request (Only supported on Web).
@@ -111,6 +118,7 @@ class PdfViewer extends StatefulWidget {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = true,
+    int? progressiveLoadingTargetPage,
     super.key,
     this.controller,
     this.params = const PdfViewerParams(),
@@ -123,6 +131,7 @@ class PdfViewer extends StatefulWidget {
          passwordProvider: passwordProvider,
          firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
          useProgressiveLoading: useProgressiveLoading,
+         progressiveLoadingTargetPage: progressiveLoadingTargetPage ?? (useProgressiveLoading ? initialPageNumber : null),
          preferRangeAccess: preferRangeAccess,
          headers: headers,
          withCredentials: withCredentials,
@@ -139,12 +148,14 @@ class PdfViewer extends StatefulWidget {
   /// [controller] is the controller to control the viewer.
   /// [params] is the parameters to customize the viewer.
   /// [initialPageNumber] is the page number to show initially.
+  /// [progressiveLoadingTargetPage] specifies the target page for progressive loading to get correct aspect ratio.
   PdfViewer.data(
     Uint8List data, {
     required String sourceName,
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = true,
+    int? progressiveLoadingTargetPage,
     super.key,
     this.controller,
     this.params = const PdfViewerParams(),
@@ -155,6 +166,7 @@ class PdfViewer extends StatefulWidget {
          passwordProvider: passwordProvider,
          firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
          useProgressiveLoading: useProgressiveLoading,
+         progressiveLoadingTargetPage: progressiveLoadingTargetPage ?? (useProgressiveLoading ? initialPageNumber : null),
        );
 
   /// Create [PdfViewer] from a custom source.
@@ -169,6 +181,7 @@ class PdfViewer extends StatefulWidget {
   /// [controller] is the controller to control the viewer.
   /// [params] is the parameters to customize the viewer.
   /// [initialPageNumber] is the page number to show initially.
+  /// [progressiveLoadingTargetPage] specifies the target page for progressive loading to get correct aspect ratio.
   PdfViewer.custom({
     required int fileSize,
     required FutureOr<int> Function(Uint8List buffer, int position, int size) read,
@@ -176,6 +189,7 @@ class PdfViewer extends StatefulWidget {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = true,
+    int? progressiveLoadingTargetPage,
     super.key,
     this.controller,
     this.params = const PdfViewerParams(),
@@ -187,6 +201,7 @@ class PdfViewer extends StatefulWidget {
          passwordProvider: passwordProvider,
          firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
          useProgressiveLoading: useProgressiveLoading,
+         progressiveLoadingTargetPage: progressiveLoadingTargetPage ?? (useProgressiveLoading ? initialPageNumber : null),
        );
 
   /// [PdfDocumentRef] that represents the PDF document.

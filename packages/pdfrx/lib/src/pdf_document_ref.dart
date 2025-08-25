@@ -82,6 +82,7 @@ class PdfDocumentRefAsset extends PdfDocumentRef {
     this.firstAttemptByEmptyPassword = true,
     super.autoDispose = true,
     this.useProgressiveLoading = true,
+    this.progressiveLoadingTargetPage,
   });
 
   final String name;
@@ -94,6 +95,9 @@ class PdfDocumentRefAsset extends PdfDocumentRef {
 
   /// Whether to use progressive loading or not.
   final bool useProgressiveLoading;
+  
+  /// Target page for progressive loading to get correct aspect ratio.
+  final int? progressiveLoadingTargetPage;
 
   @override
   Future<PdfDocument> loadDocument(PdfDocumentLoaderProgressCallback progressCallback) => PdfDocument.openAsset(
@@ -101,6 +105,7 @@ class PdfDocumentRefAsset extends PdfDocumentRef {
     passwordProvider: passwordProvider,
     firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
     useProgressiveLoading: useProgressiveLoading,
+    progressiveLoadingTargetPage: progressiveLoadingTargetPage,
   );
 
   @override
@@ -121,6 +126,7 @@ class PdfDocumentRefUri extends PdfDocumentRef {
     this.headers,
     this.withCredentials = false,
     this.useProgressiveLoading = true,
+    this.progressiveLoadingTargetPage,
   });
 
   /// The URI to load the document.
@@ -141,6 +147,9 @@ class PdfDocumentRefUri extends PdfDocumentRef {
 
   /// Whether to use progressive loading or not.
   final bool useProgressiveLoading;
+  
+  /// Target page for progressive loading to get correct aspect ratio.
+  final int? progressiveLoadingTargetPage;
 
   @override
   String get sourceName => uri.toString();
@@ -151,6 +160,7 @@ class PdfDocumentRefUri extends PdfDocumentRef {
     passwordProvider: passwordProvider,
     firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
     useProgressiveLoading: useProgressiveLoading,
+    progressiveLoadingTargetPage: progressiveLoadingTargetPage,
     progressCallback: progressCallback,
     preferRangeAccess: preferRangeAccess,
     headers: headers,
@@ -172,6 +182,7 @@ class PdfDocumentRefFile extends PdfDocumentRef {
     this.firstAttemptByEmptyPassword = true,
     super.autoDispose = true,
     this.useProgressiveLoading = true,
+    this.progressiveLoadingTargetPage,
   });
 
   final String file;
@@ -184,6 +195,9 @@ class PdfDocumentRefFile extends PdfDocumentRef {
 
   /// Whether to use progressive loading or not.
   final bool useProgressiveLoading;
+  
+  /// Target page for progressive loading to get correct aspect ratio.
+  final int? progressiveLoadingTargetPage;
 
   @override
   Future<PdfDocument> loadDocument(PdfDocumentLoaderProgressCallback progressCallback) => PdfDocument.openFile(
@@ -191,6 +205,7 @@ class PdfDocumentRefFile extends PdfDocumentRef {
     passwordProvider: passwordProvider,
     firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
     useProgressiveLoading: useProgressiveLoading,
+    progressiveLoadingTargetPage: progressiveLoadingTargetPage,
   );
 
   @override
@@ -213,6 +228,7 @@ class PdfDocumentRefData extends PdfDocumentRef {
     this.allowDataOwnershipTransfer = false,
     this.onDispose,
     this.useProgressiveLoading = true,
+    this.progressiveLoadingTargetPage,
   });
 
   final Uint8List data;
@@ -228,6 +244,9 @@ class PdfDocumentRefData extends PdfDocumentRef {
 
   /// Whether to use progressive loading or not.
   final bool useProgressiveLoading;
+  
+  /// Target page for progressive loading to get correct aspect ratio.
+  final int? progressiveLoadingTargetPage;
 
   @override
   Future<PdfDocument> loadDocument(PdfDocumentLoaderProgressCallback progressCallback) => PdfDocument.openData(
@@ -235,6 +254,7 @@ class PdfDocumentRefData extends PdfDocumentRef {
     passwordProvider: passwordProvider,
     firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
     useProgressiveLoading: useProgressiveLoading,
+    progressiveLoadingTargetPage: progressiveLoadingTargetPage,
     sourceName: sourceName,
     allowDataOwnershipTransfer: allowDataOwnershipTransfer,
     onDispose: onDispose,
@@ -259,6 +279,7 @@ class PdfDocumentRefCustom extends PdfDocumentRef {
     this.maxSizeToCacheOnMemory,
     this.onDispose,
     this.useProgressiveLoading = true,
+    this.progressiveLoadingTargetPage,
   });
 
   final int fileSize;
@@ -275,6 +296,9 @@ class PdfDocumentRefCustom extends PdfDocumentRef {
 
   /// Whether to use progressive loading or not.
   final bool useProgressiveLoading;
+  
+  /// Target page for progressive loading to get correct aspect ratio.
+  final int? progressiveLoadingTargetPage;
 
   @override
   Future<PdfDocument> loadDocument(PdfDocumentLoaderProgressCallback progressCallback) => PdfDocument.openCustom(
@@ -284,6 +308,7 @@ class PdfDocumentRefCustom extends PdfDocumentRef {
     passwordProvider: passwordProvider,
     firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
     useProgressiveLoading: useProgressiveLoading,
+    progressiveLoadingTargetPage: progressiveLoadingTargetPage,
     maxSizeToCacheOnMemory: maxSizeToCacheOnMemory,
     onDispose: onDispose,
   );

@@ -134,6 +134,7 @@ class PdfDocumentFactoryWasmImpl extends PdfDocumentFactory {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
   }) async {
     if (Pdfrx.loadAsset == null) {
       throw StateError('Pdfrx.loadAsset is not set. Please set it to load assets.');
@@ -144,6 +145,7 @@ class PdfDocumentFactoryWasmImpl extends PdfDocumentFactory {
       passwordProvider: passwordProvider,
       firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
       useProgressiveLoading: useProgressiveLoading,
+      progressiveLoadingTargetPage: progressiveLoadingTargetPage,
       sourceName: 'asset:$name',
       allowDataOwnershipTransfer: true,
     );
@@ -157,6 +159,7 @@ class PdfDocumentFactoryWasmImpl extends PdfDocumentFactory {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
     int? maxSizeToCacheOnMemory,
     void Function()? onDispose,
   }) async {
@@ -169,13 +172,14 @@ class PdfDocumentFactoryWasmImpl extends PdfDocumentFactory {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
     String? sourceName,
     bool allowDataOwnershipTransfer = false,
     void Function()? onDispose,
   }) => _openByFunc(
     (password) => _sendCommand(
       'loadDocumentFromData',
-      parameters: {'data': data, 'password': password, 'useProgressiveLoading': useProgressiveLoading},
+      parameters: {'data': data, 'password': password, 'useProgressiveLoading': useProgressiveLoading, 'progressiveLoadingTargetPage': progressiveLoadingTargetPage},
     ),
     sourceName: sourceName ?? 'data',
     passwordProvider: passwordProvider,
@@ -189,10 +193,11 @@ class PdfDocumentFactoryWasmImpl extends PdfDocumentFactory {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
   }) => _openByFunc(
     (password) => _sendCommand(
       'loadDocumentFromUrl',
-      parameters: {'url': filePath, 'password': password, 'useProgressiveLoading': useProgressiveLoading},
+      parameters: {'url': filePath, 'password': password, 'useProgressiveLoading': useProgressiveLoading, 'progressiveLoadingTargetPage': progressiveLoadingTargetPage},
     ),
     sourceName: filePath,
     passwordProvider: passwordProvider,
@@ -206,6 +211,7 @@ class PdfDocumentFactoryWasmImpl extends PdfDocumentFactory {
     PdfPasswordProvider? passwordProvider,
     bool firstAttemptByEmptyPassword = true,
     bool useProgressiveLoading = false,
+    int? progressiveLoadingTargetPage,
     PdfDownloadProgressCallback? progressCallback,
     bool preferRangeAccess = false,
     Map<String, String>? headers,
@@ -229,6 +235,7 @@ class PdfDocumentFactoryWasmImpl extends PdfDocumentFactory {
             'url': uri.toString(),
             'password': password,
             'useProgressiveLoading': useProgressiveLoading,
+            'progressiveLoadingTargetPage': progressiveLoadingTargetPage,
             if (progressCallbackReg != null) 'progressCallbackId': progressCallbackReg.id,
             'preferRangeAccess': preferRangeAccess,
             if (headers != null) 'headers': headers,
