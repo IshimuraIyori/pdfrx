@@ -460,48 +460,75 @@ class _PdfDocumentPdfium extends PdfDocument {
           return using((arena) {
             final pageCount = pdfium.FPDF_GetPageCount(doc);
             
-            // If targetPageNumber is specified, load only that page
+            // If targetPageNumber is specified, load all page sizes first
             if (params.targetPageNumber != null && 
                 params.targetPageNumber! > 0 && 
                 params.targetPageNumber! <= pageCount) {
               final targetIndex = params.targetPageNumber! - 1;
-              final page = pdfium.FPDF_LoadPage(doc, targetIndex);
-              try {
-                final targetPageData = (
-                  pageIndex: targetIndex,
-                  width: pdfium.FPDF_GetPageWidthF(page),
-                  height: pdfium.FPDF_GetPageHeightF(page),
-                  rotation: pdfium.FPDFPage_GetRotation(page),
-                );
-                return (
-                  pages: <({double width, double height, int rotation})>[],
-                  totalPageCount: pageCount,
-                  targetPageData: targetPageData,
-                );
-              } finally {
-                pdfium.FPDF_ClosePage(page);
+              final pages = <({double width, double height, int rotation})>[];
+              
+              // Load all page sizes to ensure correct aspect ratio for all pages
+              for (int i = 0; i < pageCount; i++) {
+                final page = pdfium.FPDF_LoadPage(doc, i);
+                try {
+                  pages.add((
+                    width: pdfium.FPDF_GetPageWidthF(page),
+                    height: pdfium.FPDF_GetPageHeightF(page),
+                    rotation: pdfium.FPDFPage_GetRotation(page),
+                  ));
+                } finally {
+                  pdfium.FPDF_ClosePage(page);
+                }
               }
+              
+              return (
+                pages: pages,
+                totalPageCount: pageCount,
+                targetPageData: (
+                  pageIndex: targetIndex,
+                  startIndex: 0,
+                  endIndex: pageCount,
+                ),
+              );
             }
             
-            // Normal progressive loading
-            final end = maxPageCountToLoadAdditionally == null
-                ? pageCount
-                : min(pageCount, params.pagesCountLoadedSoFar + params.maxPageCountToLoadAdditionally!);
-            final t = params.timeoutUs != null ? (Stopwatch()..start()) : null;
+            // Normal progressive loading - always load all page sizes on first call
             final pages = <({double width, double height, int rotation})>[];
-            for (int i = params.pagesCountLoadedSoFar; i < end; i++) {
-              final page = pdfium.FPDF_LoadPage(doc, i);
-              try {
-                pages.add((
-                  width: pdfium.FPDF_GetPageWidthF(page),
-                  height: pdfium.FPDF_GetPageHeightF(page),
-                  rotation: pdfium.FPDFPage_GetRotation(page),
-                ));
-              } finally {
-                pdfium.FPDF_ClosePage(page);
+            
+            // If this is the first call (no pages loaded so far), get all page sizes first
+            if (params.pagesCountLoadedSoFar == 0) {
+              for (int i = 0; i < pageCount; i++) {
+                final page = pdfium.FPDF_LoadPage(doc, i);
+                try {
+                  pages.add((
+                    width: pdfium.FPDF_GetPageWidthF(page),
+                    height: pdfium.FPDF_GetPageHeightF(page),
+                    rotation: pdfium.FPDFPage_GetRotation(page),
+                  ));
+                } finally {
+                  pdfium.FPDF_ClosePage(page);
+                }
               }
-              if (t != null && t.elapsedMicroseconds > params.timeoutUs!) {
-                break;
+            } else {
+              // Subsequent calls: just load page content, sizes already known
+              final end = params.maxPageCountToLoadAdditionally == null
+                  ? pageCount
+                  : min(pageCount, params.pagesCountLoadedSoFar + params.maxPageCountToLoadAdditionally!);
+              final t = params.timeoutUs != null ? (Stopwatch()..start()) : null;
+              for (int i = params.pagesCountLoadedSoFar; i < end; i++) {
+                final page = pdfium.FPDF_LoadPage(doc, i);
+                try {
+                  pages.add((
+                    width: pdfium.FPDF_GetPageWidthF(page),
+                    height: pdfium.FPDF_GetPageHeightF(page),
+                    rotation: pdfium.FPDFPage_GetRotation(page),
+                  ));
+                } finally {
+                  pdfium.FPDF_ClosePage(page);
+                }
+                if (t != null && t.elapsedMicroseconds > params.timeoutUs!) {
+                  break;
+                }
               }
             }
             return (
@@ -522,56 +549,70 @@ class _PdfDocumentPdfium extends PdfDocument {
 
       final pages = [...pagesLoadedSoFar];
       
-      // If we loaded a specific target page, create all pages with the target page's aspect ratio
+      // If we loaded a specific target page, we now have all page sizes
       if (results.targetPageData != null) {
         final targetData = results.targetPageData!;
-        for (int i = 0; i < results.totalPageCount; i++) {
-          final isTargetPage = i == targetData.pageIndex;
+        final loadedPages = results.pages;
+        
+        // Create all pages with their correct sizes
+        for (int i = 0; i < loadedPages.length; i++) {
+          final pageData = loadedPages[i];
           pages.add(
             _PdfPagePdfium._(
               document: this,
               pageNumber: i + 1,
-              width: targetData.width,
-              height: targetData.height,
-              rotation: PdfPageRotation.values[targetData.rotation],
-              isLoaded: isTargetPage,
+              width: pageData.width,
+              height: pageData.height,
+              rotation: PdfPageRotation.values[pageData.rotation],
+              isLoaded: i == targetData.pageIndex, // Only mark target page as loaded
             ),
           );
         }
-        return (pages: pages, pageCountLoadedTotal: 1);
+        
+        return (pages: pages, pageCountLoadedTotal: 1); // Only target page content is loaded
       }
       
       // Normal progressive loading logic
-      for (int i = 0; i < results.pages.length; i++) {
-        final pageData = results.pages[i];
-        pages.add(
-          _PdfPagePdfium._(
-            document: this,
-            pageNumber: pages.length + 1,
-            width: pageData.width,
-            height: pageData.height,
-            rotation: PdfPageRotation.values[pageData.rotation],
-            isLoaded: true,
-          ),
-        );
-      }
-      final pageCountLoadedTotal = pages.length;
-      if (pageCountLoadedTotal > 0) {
-        final last = pages.last;
-        for (int i = pages.length; i < results.totalPageCount; i++) {
+      if (pagesLoadedSoFar.isEmpty) {
+        // First call: create all pages with correct sizes
+        for (int i = 0; i < results.pages.length; i++) {
+          final pageData = results.pages[i];
+          final isFirstPage = i == 0 && maxPageCountToLoadAdditionally != null;
+          pages.add(
+            _PdfPagePdfium._(
+              document: this,
+              pageNumber: i + 1,
+              width: pageData.width,
+              height: pageData.height,
+              rotation: PdfPageRotation.values[pageData.rotation],
+              isLoaded: isFirstPage, // Only first page content is loaded in progressive mode
+            ),
+          );
+        }
+        return (pages: pages, pageCountLoadedTotal: maxPageCountToLoadAdditionally != null ? 1 : results.pages.length);
+      } else {
+        // Subsequent calls: update loaded status for already sized pages
+        for (int i = 0; i < results.pages.length; i++) {
+          final pageData = results.pages[i];
           pages.add(
             _PdfPagePdfium._(
               document: this,
               pageNumber: pages.length + 1,
-              width: last.width,
-              height: last.height,
-              rotation: last.rotation,
-              isLoaded: false,
+              width: pageData.width,
+              height: pageData.height,
+              rotation: PdfPageRotation.values[pageData.rotation],
+              isLoaded: true,
             ),
           );
         }
+        // Add remaining unloaded pages (should already have sizes)
+        for (int i = pages.length; i < results.totalPageCount; i++) {
+          // This shouldn't happen with the new implementation, but keep as safety
+          final existingPage = pagesLoadedSoFar[i];
+          pages.add(existingPage);
+        }
+        return (pages: pages, pageCountLoadedTotal: pages.where((p) => p.isLoaded).length);
       }
-      return (pages: pages, pageCountLoadedTotal: pageCountLoadedTotal);
     } catch (e) {
       rethrow;
     }
