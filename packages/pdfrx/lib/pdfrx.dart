@@ -4,6 +4,7 @@ export 'package:pdfrx_engine/pdfrx_engine.dart';
 export 'src/pdf_document_ref.dart';
 export 'src/pdfrx_flutter.dart';
 export 'src/widgets/pdf_page_instant.dart';
+export 'src/widgets/pdf_page_view_dynamic.dart';
 export 'src/widgets/pdf_single_page.dart';
 export 'src/widgets/pdf_single_page_dynamic.dart';
 export 'src/widgets/pdf_text_searcher.dart';
