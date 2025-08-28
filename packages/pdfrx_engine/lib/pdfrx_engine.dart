@@ -4,3 +4,4 @@ export 'src/mock/pdfrx_initialize_mock.dart' if (dart.library.io) 'src/pdfrx_ini
 export 'src/pdfrx_api.dart';
 export 'src/pdfrx_api_extension.dart';
 export 'src/pdfrx_dart.dart';
+export 'src/pdfrx_lazy_loading.dart';
