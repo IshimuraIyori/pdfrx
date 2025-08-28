@@ -20,13 +20,13 @@ dependencies:
   pdfrx:
     git:
       url: https://github.com/IshimuraIyori/pdfrx.git
-      ref: new-feature-branch  # または最新のブランチ/タグ
+      ref: feature/pdf-single-page  # 真の遅延ロード実装ブランチ
       path: packages/pdfrx
   
   pdfrx_engine:
     git:
       url: https://github.com/IshimuraIyori/pdfrx.git
-      ref: new-feature-branch  # または最新のブランチ/タグ
+      ref: feature/pdf-single-page  # 真の遅延ロード実装ブランチ
       path: packages/pdfrx_engine
   
   # ファイル選択用（オプション）
