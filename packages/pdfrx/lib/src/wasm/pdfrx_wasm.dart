@@ -380,6 +380,77 @@ class _PdfDocumentWasm extends PdfDocument {
   @override
   late final List<PdfPage> pages;
 
+  /// Load a specific page dynamically without loading other pages.
+  /// Returns true if successful, false otherwise.
+  @override
+  Future<bool> loadPageDynamically(int pageNumber) async {
+    if (isDisposed) return false;
+    if (pageNumber < 1 || pageNumber > pages.length) return false;
+    
+    final pageIndex = pageNumber - 1;
+    final page = pages[pageIndex];
+    
+    // If already loaded, return immediately
+    if (page.isLoaded) return true;
+    
+    try {
+      // Request to load this specific page
+      final result = await _sendCommand(
+        'loadPageDynamically',
+        parameters: {
+          'docHandle': document['docHandle'],
+          'pageIndex': pageIndex,
+        },
+      );
+      
+      if (result['success'] == true && result['page'] != null) {
+        // Update the page with actual dimensions
+        final loadedPage = parsePages(this, [result['page']])[0];
+        pages[pageIndex] = loadedPage;
+        
+        // Notify listeners about the page status change
+        if (!subject.isClosed) {
+          subject.add(PdfDocumentPageStatusChangedEvent(this, [loadedPage]));
+        }
+        
+        return true;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+  
+  /// Load multiple specific pages dynamically.
+  /// Returns a map of page numbers to success status.
+  @override
+  Future<Map<int, bool>> loadPagesDynamically(List<int> pageNumbers) async {
+    if (isDisposed) return {};
+    
+    final results = <int, bool>{};
+    final pagesToLoad = <int>[];
+    
+    // Filter out invalid and already loaded pages
+    for (final pageNum in pageNumbers) {
+      if (pageNum < 1 || pageNum > pages.length) {
+        results[pageNum] = false;
+      } else if (pages[pageNum - 1].isLoaded) {
+        results[pageNum] = true;
+      } else {
+        pagesToLoad.add(pageNum);
+      }
+    }
+    
+    if (pagesToLoad.isEmpty) return results;
+    
+    // Load pages one by one (WASM might not support parallel loading efficiently)
+    for (final pageNum in pagesToLoad) {
+      results[pageNum] = await loadPageDynamically(pageNum);
+    }
+    
+    return results;
+  }
+
   static PdfPermissions? parsePermissions(Map<Object?, dynamic> document) {
     final perms = (document['permissions'] as num).toInt();
     final securityHandlerRevision = (document['securityHandlerRevision'] as num).toInt();

@@ -352,6 +352,23 @@ abstract class PdfDocument {
     Duration loadUnitDuration = const Duration(milliseconds: 250),
   });
 
+  /// Load a specific page dynamically.
+  /// 
+  /// This method loads only the specified page with its correct dimensions.
+  /// If the page is already loaded, this method returns immediately.
+  /// 
+  /// [pageNumber] is 1-based page number.
+  /// Returns true if the page was successfully loaded, false otherwise.
+  Future<bool> loadPageDynamically(int pageNumber);
+
+  /// Load multiple pages dynamically.
+  /// 
+  /// This method loads multiple pages specified in [pageNumbers].
+  /// Pages that are already loaded are skipped.
+  /// 
+  /// Returns a map of page numbers to their load success status.
+  Future<Map<int, bool>> loadPagesDynamically(List<int> pageNumbers);
+
   /// Pages.
   List<PdfPage> get pages;
 

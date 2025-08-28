@@ -627,6 +627,109 @@ class _PdfDocumentPdfium extends PdfDocument {
   bool isIdenticalDocumentHandle(Object? other) =>
       other is _PdfDocumentPdfium && document.address == other.document.address;
 
+  /// Load a specific page dynamically without loading other pages.
+  /// Returns true if successful, false otherwise.
+  @override
+  Future<bool> loadPageDynamically(int pageNumber) async {
+    if (isDisposed) return false;
+    if (pageNumber < 1 || pageNumber > _pages.length) return false;
+    
+    final pageIndex = pageNumber - 1;
+    final page = _pages[pageIndex];
+    
+    // If already loaded, return immediately
+    if (page.isLoaded) return true;
+    
+    try {
+      // Load only this specific page's dimensions
+      final pageData = await _loadSinglePageDimensions(pageIndex);
+      if (pageData == null) return false;
+      
+      // Update the page with actual dimensions
+      final updatedPage = _PdfPagePdfium._(
+        document: this,
+        pageNumber: pageNumber,
+        width: pageData.width,
+        height: pageData.height,
+        rotation: PdfPageRotation.values[pageData.rotation],
+        isLoaded: true,
+      );
+      
+      // Create new list with updated page
+      final newPages = List<_PdfPagePdfium>.from(_pages);
+      newPages[pageIndex] = updatedPage;
+      _pages = List.unmodifiable(newPages);
+      
+      // Notify listeners about the page status change
+      subject.add(PdfDocumentPageStatusChangedEvent(this, [updatedPage]));
+      
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  
+  /// Load multiple specific pages dynamically.
+  /// Returns a map of page numbers to success status.
+  @override
+  Future<Map<int, bool>> loadPagesDynamically(List<int> pageNumbers) async {
+    if (isDisposed) return {};
+    
+    final results = <int, bool>{};
+    final pagesToLoad = <int>[];
+    
+    // Filter out invalid and already loaded pages
+    for (final pageNum in pageNumbers) {
+      if (pageNum < 1 || pageNum > _pages.length) {
+        results[pageNum] = false;
+      } else if (_pages[pageNum - 1].isLoaded) {
+        results[pageNum] = true;
+      } else {
+        pagesToLoad.add(pageNum);
+      }
+    }
+    
+    if (pagesToLoad.isEmpty) return results;
+    
+    // Load pages in parallel
+    final futures = <Future<bool>>[];
+    for (final pageNum in pagesToLoad) {
+      futures.add(loadPageDynamically(pageNum));
+    }
+    
+    final loadResults = await Future.wait(futures, eagerError: false);
+    for (int i = 0; i < pagesToLoad.length; i++) {
+      results[pagesToLoad[i]] = loadResults[i];
+    }
+    
+    return results;
+  }
+  
+  /// Load dimensions for a single page without loading other pages.
+  Future<({double width, double height, int rotation})?> _loadSinglePageDimensions(int pageIndex) async {
+    try {
+      return await (await backgroundWorker).compute(
+        (params) {
+          final doc = pdfium_bindings.FPDF_DOCUMENT.fromAddress(params.docAddress);
+          final page = pdfium.FPDF_LoadPage(doc, params.pageIndex);
+          if (page == nullptr) return null;
+          try {
+            return (
+              width: pdfium.FPDF_GetPageWidthF(page),
+              height: pdfium.FPDF_GetPageHeightF(page),
+              rotation: pdfium.FPDFPage_GetRotation(page),
+            );
+          } finally {
+            pdfium.FPDF_ClosePage(page);
+          }
+        },
+        (docAddress: document.address, pageIndex: pageIndex),
+      );
+    } catch (e) {
+      return null;
+    }
+  }
+
   @override
   Future<void> dispose() async {
     if (!isDisposed) {
